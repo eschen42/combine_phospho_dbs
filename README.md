@@ -55,8 +55,8 @@ Default settings are set in `fetch_all.sh` using environment variables,
 but you can override these settings by setting environment
 variables before invoking `fetch_all.sh`.  The defaults are:
 
-|: Environment Variable      |: Default Value                |
---------------------------------------------------------------
+| Environment Variable       | Default Value                 |
+| :------------------------- | :---------------------------- |
 | `TAXID`                    | `9606`                        |
 | `SPECIES`                  | `HUMAN_9606`                  |
 | `SPECIES_NAME`             | `HUMAN`                       |
