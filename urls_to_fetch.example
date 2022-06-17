@@ -1,0 +1,163 @@
+# source this file from other scripts; do not invoke it explicitly
+export SPECIES=${SPECIES:?'set the SPECIES environment variable (e.g., "HUMAN_9606") before sourcing urls_to_fetch.sh'}
+export TAXID=${TAXID:?'set the TAXID environment variable (e.g., "9606") before sourcing urls_to_fetch.sh'}
+export SPECIES_NAME
+export UNIPROT_PROTEOME=${UNIPROT_PROTEOME:?'set the UNIPROT_PROTEOME environment variable (e.g., "UP000005640_9606") before sourcing urls_to_fetch.sh'}
+export UNIPROT_PROTEOME_NO_OX="$(echo ${UNIPROT_PROTEOME} | sed -e 's/_.*//')"
+
+###################################
+# paths to output DB go here, or comment them out to use the defaults
+PHOSPHOELM_SQLITE=${PHOSPHOELM_SQLITE:-phosphoelm_kin_bind.sqlite}
+NETWORKIN_SQLITE=${NETWORKIN_SQLITE:-networkin.sqlite}
+PHOSIDA_SQLITE=${PHOSIDA_SQLITE:-phosida_motifs.sqlite}
+UNIPROT_XREF_SQLITE=${UNIPROT_XREF_SQLITE:-${SPECIES}_uniprot_xref.sqlite}
+UNIPROT_PROTEOME_SQLITE=${UNIPROT_PROTEOME_SQLITE:-${UNIPROT_PROTEOME}.sqlite}
+PHOSPHO_AGGREGATE_SQLITE=${PHOSPHO_AGGREGATE_SQLITE:-'combined_phospho_dbs.sqlite'}
+PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT=${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT:-'elm_networkin_psp_uniprot_lut'}
+
+###################################
+# commands create citation table in aggregation database
+export CITTBL_CREATE='CREATE TABLE IF NOT EXISTS citation(table_name TEXT NOT NULL, url TEXT NOT NULL, attribution TEXT NOT NULL, terms TEXT, derivation TEXT, UNIQUE(table_name, url, attribution) ON CONFLICT REPLACE);'
+export CITTBL_INSERT_TBL_URL_ATTRB='INSERT INTO citation(table_name, url, attribution, terms, derivation) VALUES '
+export CITTBL_DERIVED_NO='primary'
+export CITTBL_DERIVED_YES='derived'
+
+###################################
+
+# Defining LICENSE_AGREED_PHOSPHOSITESPLUS means that you agree to abide by "academic license" terms set forth at http://phospho.elm.eu.org/dataset.html
+export LICENSE_URL_PHOSPHOSITESPLUS='https://www.phosphosite.org/staticDownloads'
+export LICENSE_AGREED_PHOSPHOSITESPLUS="YES ${LICENSE_URL_PHOSPHOSITESPLUS}"
+export LICENSE_ATTRIBUTION_PHOSPHOSITESPLUS="Attribution must be given in written, oral and digital presentations to PhosphoSitePlus, www.phosphosite.org. Written documents should additionally cite Hornbeck PV, Kornhauser JM, Tkachev S, Zhang B, Skrzypek E, Murray B, Latham V, Sullivan M (2012) PhosphoSitePlus: a comprehensive resource for investigating the structure and function of experimentally determined post-translational modifications in man and mouse. Nucleic Acids Res. 40, D26170, DOI: 10.1093/nar/gkr1122.  PMID: 22135298.; www.phosphosite.org."
+export LICENSE_TERMS_PHOSPHOSITESPLUS="Data extracted from PhosphoSitePlus(R), created by Cell Signaling Technology Inc. PhosphoSitePlus is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License (CC-NC-SA 3.0 https://creativecommons.org/licenses/by-nc-sa/3.0/)."
+
+export URL_PSP_KINASE_SUBSTRATE='https://web.archive.org/web/20210625175218/https://www.phosphosite.org/downloads/Kinase_Substrate_Dataset.gz'
+export URL_PSP_REGULATORY_SITES='https://web.archive.org/web/20150918235046/http://www.phosphosite.org/downloads/Regulatory_sites.gz'
+
+###################################
+
+# Defining LICENSE_AGREED_ELM means that you agree to abide by "academic license" terms set forth at http://phospho.elm.eu.org/dataset.html
+export LICENSE_URL_ELM='http://phospho.elm.eu.org/dataset.html'
+export LICENSE_AGREED_ELM="YES ${LICENSE_URL_ELM}"
+export LICENSE_ATTRIBUTION_ELM="Holger Dinkel, Claudia Chica, Allegra Via, Cathryn M. Gould, Lars J. Jensen, Toby J. Gibson, Francesca Diella, Phospho.ELM: a database of phosphorylation sites -- update 2011, Nucleic Acids Research, Volume 39, Issue suppl_1, 1 January 2011, Pages D261-D267, DOI: 10.1093/nar/gkq1104.  PMID: 21062810."
+export LICENSE_TERMS_ELM="The data in ELM and phospho.ELM should not be used or shared for any commercial purposes and should not be distributed to a third party without prior consent. Please read the full Phospho.ELM academic license agreement (http://phospho.elm.eu.org/dumps/Phospho.Elm_AcademicLicense.pdf).  If you have any further questions or problems with downloading the data, please email: phospho@elm.eu.org."
+
+export         URL_PHOSPHO_ELM_SWITCHES='http://switches.elm.eu.org/downloads/switches.ELM-v1.txt'
+export          URL_PHOSPHO_ELM_KINASES='http://phospho.elm.eu.org/kinases.html'
+export          URL_PHOSPHO_ELM_DOMAINS='http://phospho.elm.eu.org/domains.html'
+export              URL_PHOSPHO_ELM_API='http:\/\/phospho.elm.eu.org'
+export                  URL_ELM_CLASSES='http://elm.eu.org/elms/elms_index.tsv'
+
+export URL_PHOSPHO_ELM_DUMP_VERTEBRATES='http://phospho.elm.eu.org/dumps/phosphoELM_vertebrate_latest.dump.tgz'
+export PHOSPHOELM_SQLITE=${PHOSPHOELM_SQLITE:-phosphoelm_kin_bind.sqlite}
+
+###################################
+
+# Defining LICENSE_AGREED_NETWORKIN means that you agree to abide by "noncommerical use" terms set forth at http://networkin.science/contact.shtml
+export LICENSE_URL_NETWORKIN='http://networkin.science/contact.shtml'
+export LICENSE_AGREED_NETWORKIN="YES ${LICENSE_URL_NETWORKIN}"
+export LICENSE_ATTRIBUTION_NETWORKIN="Horn et al., KinomeXplorer: an integrated platform for kinome biology studies. Nature Methods 2014 Jun;11(6):603-4, DOI: 10.1038/nmeth.2968.  PMID: 24874572."
+export LICENSE_TERMS_NETWORKIN="Commercial users are requested to contact the authors before using the data on this website.  If you use any of the data from this web site please cite Horn et al. (2014)."
+
+export URL_NETWORKIN_HUMAN_PREDICTIONS_3_1='http://networkin.science/download/networkin_human_predictions_3.1.tsv.xz'
+export NETWORKIN_SQLITE=${NETWORKIN_SQLITE:-networkin.sqlite}
+
+###################################
+
+# No license requirements are posted anywhere at the Phosida site
+export URL_PHOSIDA='http://pegasus.biochem.mpg.de/phosida/help/motifs.aspx'
+export LICENSE_URL_PHOSIDA="http://pegasus.biochem.mpg.de/phosida/index.aspx"
+export LICENSE_ATTRIBUTION_PHOSIDA="Gnad F, Gunawardena J, Mann M. PHOSIDA 2011: the posttranslational modification database. Nucleic Acids Res. 2011 Jan;39(Database issue):D253-60. DOI: 10.1093/nar/gkq1159. Epub 2010 Nov 16, DOI: 10.1093/nar/gkq1159.  PMID: 21081558."
+export LICENSE_TERMS_PHOSIDA="Data published in Gnad et al. (2010).  Copyright (c) the author(s) 2010. Published by Oxford University Press."
+export PHOSIDA_SQLITE=${PHOSIDA_SQLITE:-phosida_motifs.sqlite}
+
+###################################
+
+# Although HPRD in general is licensed only for non-commercial use,
+#   these data come straight from supplementary tables for
+#     Amanchy et al. "A curated compendium of phosphorylation motifs" (2007) 
+#       DOI: 10.1038/nbt0307-285  PMID: 17344875
+export URL_HPRD_TYROSINE_MOTIFS='http://hprd.org/tyrosine_motifs'
+export   URL_HPRD_SERINE_MOTIFS='http://hprd.org/serine_motifs'
+export         LICENSE_URL_HPRD="http://hprd.org/index_html"
+export LICENSE_ATTRIBUTION_HPRD="Amanchy R, Periaswamy B, Mathivanan S, Reddy R, Tattikota SG, Pandey A. A curated compendium of phosphorylation motifs. Nat Biotechnol. 2007 Mar;25(3):285-6, DOI: 10.1038/nbt0307-285.  PMID: 17344875."
+export LICENSE_TERMS_HPRD="Data published in Amanchy et al. (2007).  Copyright (c) 2007 Nature Publishing Group, http://www.nature.com/naturebiotechnology."
+
+###################################
+
+# According to
+#   https://www.uniprot.org/help/license
+# UniProt data are covered by version 4 of the Creative Commons Shared Attribution License
+#   https://creativecommons.org/licenses/by/4.0/
+# i.e., they are freely available (even for modification) so long as (1) appropriate credit
+# is given to the data creator (UniProt), (2) no legal or technical measures are put
+# in place to restrict access to the data, and (3) modifications are acknowledged.
+export LICENSE_URL_UNIPROT='https://www.uniprot.org/help/publications'
+export LICENSE_ATTRIBUTION_UNIPROT='UniProt Consortium. UniProt: the universal protein knowledgebase in 2021. Nucleic Acids Res. 2021 Jan 8;49(D1):D480-D489, DOI: 10.1093/nar/gkaa1100.  PMID: 33237286.'
+export LICENSE_TERMS_UNIPROT='UniProt data are covered by version 4 of the Creative Commons Shared Attribution License (CC-SA 4.0, https://creativecommons.org/licenses/by/4.0/).'
+
+# export UNIPROT_PROTEOME=${UNIPROT_PROTEOME:?'set the UNIPROT_PROTEOME environment variable (e.g., UP000005640_9606) before sourcing urls_to_fetch.sh'}
+# export UNIPROT_PROTEOME_NO_OX="$(echo ${UNIPROT_PROTEOME} | sed -e 's/_.*//')"
+
+export URL_UNIPROT_API='https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase'
+export  URL_UNIPROT_IDMAPPING_SELECTED="${URL_UNIPROT_API}/idmapping/by_organism/${SPECIES}_idmapping_selected.tab.gz"
+export           URL_UNIPROT_IDMAPPING="${URL_UNIPROT_API}/idmapping/by_organism/${SPECIES}_idmapping.dat.gz"
+export               URL_UNIPROT_FASTA="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}.fasta.gz"
+export    URL_UNIPROT_FASTA_ADDITIONAL="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}_additional.fasta.gz"
+export            URL_UNIPROT_METADATA="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}.dat.gz"
+export URL_UNIPROT_METADATA_ADDITIONAL="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}_additional.dat.gz"
+export               URL_UNIPROT_FASTA="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}.fasta.gz"
+export    URL_UNIPROT_FASTA_ADDITIONAL="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}_additional.fasta.gz"
+export         UNIPROT_PROTEOME_SQLITE=${UNIPROT_PROTEOME_SQLITE:-${UNIPROT_PROTEOME}.sqlite}
+export             UNIPROT_XREF_SQLITE=${UNIPROT_XREF_SQLITE:-${SPECIES}_uniprot_xref.sqlite}
+
+###################################
+#
+#                 THE ENZYME NOMENCLATURE DATABASE USER MANUAL
+#                            Release of 25-May-2022
+#
+#  Alan Bridge and Kristian Axelsen
+#  SIB Swiss Institute of Bioinformatics
+#  Centre Medical Universitaire (CMU)
+#  1, rue Michel Servet
+#  1211 Geneva 4
+#  Switzerland
+#
+#  Electronic mail address: enzyme@expasy.org
+#
+#
+#  ENZYME is available at: http://enzyme.expasy.org/
+#
+#  ------------------------------------------------------------------------
+#  Copyrighted by the SIB Swiss Institute of Bioinformatics and
+#  distributed under the Creative Commons Attribution (CC BY 4.0) License
+#  ------------------------------------------------------------------------
+#
+# According to version 4 of the Creative Commons Shared Attribution License
+#   https://creativecommons.org/licenses/by/4.0/
+# these data are freely available (even for modification) so long as:
+#  (1) appropriate credit is given to the data creator (see above),
+#  (2) no legal or technical measures are put in place to restrict access
+#      to the data, and
+#  (3) modifications are acknowledged.
+###################################
+# Presumably, the ultimate source of these data is:
+#   https://www.enzyme-database.org/downloads.php
+# which might ordinarily be a better place to start instead.
+# Details and references regarding an EC activity may be found thusly:
+#   https://www.enzyme-database.org/query.php?ec=2.7.11.1
+# which gives literature references but not the cross references to
+# UniProtKB (which is essential to this work)
+###################################
+export LICENSE_URL_EC='https://ftp.expasy.org/databases/enzyme/enzuser.txt'
+export LICENSE_ATTRIBUTION_EC='Bairoch A. The ENZYME database in 2000. Nucleic Acids Res. 2000 Jan 1;28(1):304-5. doi: 10.1093/nar/28.1.304. PMID: 10592255.'
+export LICENSE_TERMS_EC='The ENZYME data are covered by version 4 of the Creative Commons Shared Attribution License (CC-SA 4.0, https://creativecommons.org/licenses/by/4.0/).'
+export URL_EC_DAT='https://ftp.expasy.org/databases/enzyme/enzyme.dat'
+
+###################################
+# ('elm_networkin_psp_uniprot_lut', '${LICENSE_URL_PHOSPHO_AGGREGATE_SQLITE}', '${LICENSE_ATTRIBUTION_PHOSPHO_AGGREGATE_SQLITE}', '${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE}', '"${CITTBL_DERIVED_NO}"')
+# database name and citation table entries for the aggregated extracted data
+export PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT=${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT:-'elm_networkin_psp_uniprot_lut'}
+export PHOSPHO_AGGREGATE_SQLITE=${PHOSPHO_AGGREGATE_SQLITE:-'combined_phospho_dbs.sqlite'}
+export LICENSE_URL_PHOSPHO_AGGREGATE_SQLITE='https://creativecommons.org/publicdomain/zero/1.0/'
+export LICENSE_ATTRIBUTION_PHOSPHO_AGGREGATE_SQLITE='Arthur Eschenlauer 2022, unpublished data; will replace this description when there a git repository exists.'
+export LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE="Art Eschenlauer has waived all copyright and related or neighboring rights to ${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT} and ${PHOSPHO_AGGREGATE_SQLITE}"

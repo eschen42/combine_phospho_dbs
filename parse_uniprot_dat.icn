@@ -1,0 +1,912 @@
+############################################################################
+#
+# File: parse_uniprot_dat.icn
+#
+# Subject: parse_uniprot_dat.icn - Parse UniProtKB data to SQLite statements
+#
+# Author: Arthur Eschenlauer (https://orcid.org/0000-0002-2882-0508)
+#
+# Date: 09 June 2022
+#
+############################################################################
+#
+# This file is in the public domain. Art Eschenlauer has waived all
+# copyright and related or neighboring rights to:
+#   parse_uniprot_dat.icn - Parse UniProtKB data to SQLite statements
+# For details, see:
+#   https://creativecommons.org/publicdomain/zero/1.0/
+#
+# If you require a specific license and public domain status is not
+# sufficient for your needs, please apply the MIT license, bearing
+# in mind that the copyright "claim" is solely to meet your requirements
+# and does not imply any restriction on use or copying by the author:
+#
+#   Copyright (c) 2020, Arthur Eschenlauer
+#
+#   Permission is hereby granted, free of charge, to any person obtaining
+#   a copy of this software and associated documentation files (the
+#   "Software"), to deal in the Software without restriction, including
+#   without limitation the rights to use, copy, modify, merge, publish,
+#   distribute, sublicense, and/or sell copies of the Software, and to
+#   permit persons to whom the Software is furnished to do so, subject
+#   to the following conditions:
+#
+#   The above copyright notice and this permission notice shall be
+#   included in all copies or substantial portions of the Software.
+#
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+#   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+#   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+#   BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+#   ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+#   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#   SOFTWARE.
+#
+############################################################################
+#
+# This program parses un-gzipped .dat files for reference proteomes under
+#   https://ftp.uniprot.org/pub/databases/uniprot/current_release\
+#                                         /knowledgebase/reference_proteomes
+# into SQL statements for inserting the data into a SQLite database.
+#
+# Usage:
+#   ./parse_uniprot_dat -i inp -o out -f fmt -n -x \
+#                       -t trc -d dmp -debug -help
+# 
+# where (for all formats):
+#   -i inp = path to input file, or the "-" character for stdin
+#              If -i is not specified, the unnamed arguments
+#              are used if present; stdin is used otherwise.
+#   -o out = path to input file, or the '-' character for stdout
+#              If -o is not specified, the second unnamed argument
+#              is used if present; stdout is used otherwise.
+#   -f fmt = format, one of:
+#              "sql" - SQLite SQL (the default)
+#              "xencode" - robustly serialized Icon data structures:
+#                https://www2.cs.arizona.edu/icon/library/src/procs/xcodes.icn
+#              "ximage" - visually presented Icon data structures:
+#                https://www2.cs.arizona.edu/icon/library/src/procs/ximage.icn
+# 
+# and where (for SQL format):
+#   -t trc = integer as described for &dump on p. 180 of
+#              https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf
+#   -x     = use one transaction per UniProt ID when format is SQL
+#              (which may be five times slower)
+#   -n     = omit DDL (table and view creation statements) when format is SQL
+# 
+# and where (for debugging):
+#   -d dmp = integer as described for &dump on p. 196 of
+#              https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf
+#   -debug = print program debugging output
+#   -help  = print this help message and exit
+# 
+# All arguments are optional but only these named arguments are allowed.
+#
+############################################################################
+#
+# Links: codeobj, optinos, printf, strings, xcodes, ximage
+#
+############################################################################
+#
+
+link codeobj
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/codeobj.icn
+# for encode(s)
+
+link options
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/options.icn
+# for options(arg, optstring, errproc)
+#   option format: `-name%` where `%` is one of:
+#     ! No value is required or allowed
+#     : A string value is required
+#     + An integer value is required
+#     . A real value is required
+
+link printf
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/printf.icn
+# for sprintf(format, args[])
+#   This procedure behaves somewhat like the standard printf.
+#   Supports d, e, s, o, and x formats like printf.  An "r" format
+#  prints real numbers in a manner similar to that of printf's "f".
+#  Though "e" differs from printf in some details, it always produces
+#  exponential format.
+#    Left or right justification and field width control are provided
+#  as in printf.  %s, %r, and %e handle precision specifications.
+
+link strings
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/strings.icn
+# for replace(s1, s2, s3)
+#   Replaces all occurrences of s2 in s1 by s3; fails when s2 is null.
+# replacem(s, ...)
+#   Performs multiple replacements in the style of
+#   of replace(), where multiple argument pairs
+#   may be given, as in
+#     replacem(s, "a", "bc", "d", "cd")
+#   which replaces all "a"s by "bc"s and all
+#   "d"s by "cd"s.
+#   Replacements are performed one after another, not in parallel.
+
+link xcodes
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/xcodes.icn
+# for xencode(X, f)
+
+link ximage
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/ximage.icn
+# for ximage(X)
+
+global parm
+
+$define DEBUG if \parm["debug"] then
+$define BEGIN_TRANSACTION    parm["transaction begin"]() 
+$define COMMIT_TRANSACTION   parm["transaction commit"]() 
+$define ROLLBACK_TRANSACTION parm["transaction rollback"]() 
+$define SL3_PUT              parm["transaction put"]
+$define SL3_BEGIN_DML        parm["dml begin"]()
+$define SL3_END_DML          parm["dml end"]()
+$define SL3_CREATE_SCHEMA    parm["ddl"]()
+$define SL3_DML_INIT         sl3_dml_prep()
+
+procedure usage(s)
+  write("---")
+  write("This program parses un-gzipped .dat files for reference proteomes under")
+  write(
+    "  https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes"
+    )
+  write("into SQL statements for inserting the data into a SQLite database.")
+  write("\nUsage: ")
+  write("  ",&progname," -i inp -o out -f fmt -d dmp -t trc -debug -help")
+  write("\nwhere (for all formats):")
+  write("  -i inp = path to input file, or the \"-\" character for stdin")
+  write("             If -i is not specified, the unnamed arguments")
+  write("             are used if present; stdin is used otherwise.")
+  write("  -o out = path to input file, or the '-' character for stdout")
+  write("             If -o is not specified, the second unnamed argument")
+  write("             is used if present; stdout is used otherwise.")
+  write("  -f fmt = format, one of:")
+  write("             \"sql\" - SQLite SQL (the default)")
+  write("             \"xencode\" - robustly serialized Icon data structures:")
+  write("               https://www2.cs.arizona.edu/icon/library/src/procs/xcodes.icn")
+  write("             \"ximage\" - visually presented Icon data structures:")
+  write("               https://www2.cs.arizona.edu/icon/library/src/procs/ximage.icn")
+  write("\nand where (for SQL format):")
+  write("  -n     = omit DDL (table and view creation statements) when format is SQL")
+  write("  -x     = use one transaction per UniProt ID when format is SQL")
+  write("             (which may be five times slower)")
+  write("\nand where (debugging):")
+  write("  -d dmp = integer as described for &dump on p. 196 of")
+  write("             https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf")
+  write("  -t trc = integer as described for &dump on p. 180 of")
+  write("             https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf")
+  write("  -debug = print program debugging output")
+  write("  -help  = print this help message and exit")
+  write("\nAll arguments are optional but only these named arguments are allowed.")
+  if \s then {
+    write("")
+    write("*** ERROR: ", \s, " ***")
+    }
+  stop("...")
+  end
+
+procedure main(args)
+  parm := options(args, "-debug! -help! -n! -x! -f: -i: -o: -d+ -t+", usage)
+  if \parm["help"] then usage()
+  parm["args"] := args
+  &dump  := \parm["d"]
+  &trace := \parm["t"]
+  parm["fout"] := open("-" ~== \parm["o"] | \args[2], "w") | &output
+  parm["fin"]  :=
+    if parm["fout"] === &output
+      then create open("-" ~== \parm["i"] | \args[1], "r") | &input
+      else create open("-" ~== \parm["i"]) | every open(!args, "r")
+  /parm["f"] := "sql"
+
+  if \parm["x"]
+    then {
+      parm["transaction begin"]    := sl3_begin_trxn
+      parm["transaction commit"]   := sl3_commit_trxn
+      parm["transaction rollback"] := sl3_rollback_trxn
+      parm["transaction put"]      := sl3_put_trxn
+      parm["dml begin"]            := sl3_no_op
+      parm["dml end"]              := sl3_no_op
+      }
+    else {
+      parm["transaction begin"]    := sl3_begin_no_trxn
+      parm["transaction commit"]   := sl3_commit_no_trxn
+      parm["transaction rollback"] := sl3_rollback_no_trxn
+      parm["transaction put"]      := sl3_put_no_trxn
+      parm["dml begin"]            := sl3_begin_trxn
+      parm["dml end"]              := sl3_commit_trxn
+      }
+
+  parm["ddl"] :=
+    if parm["f"] == "sql" & /parm["n"]
+      then sl3_create_schema
+      else sl3_no_op
+
+  case parm["f"] of {
+    "sql"     : {
+      SL3_CREATE_SCHEMA
+      SL3_DML_INIT
+      SL3_BEGIN_DML
+      every sl3_tid(tids_gen())
+      SL3_END_DML
+      }
+    "xencode" : every xencode_tid(tids_gen())
+    "ximage"  : every ximage_tid(tids_gen())
+    }
+
+  end
+
+procedure tid_init()
+  local tid
+  tid := table()
+  tid["GN"] := []
+  tid["INTERACTION"] := table()
+  tid["ALTERNATIVE PRODUCTS"] := [ ]
+  return tid
+  end
+
+procedure tids_gen()
+  local fin, tid, line
+  local residue, position
+  local acc1, acc2, ix1, ix2, L
+  local dashbang
+  while fin  := @parm["fin"] do {
+    tid := tid_init()
+    while line := read(fin) do line ? {
+      DEBUG case left(line, 2) of {
+        "AC" : write(&errout, "# ", line)
+        "CC" : write(&errout, "# ", line)
+        "DB" : write(&errout, "# ", line)
+        "DE" : write(&errout, "# ", line)
+        "DR" : write(&errout, "# ", line)
+        "FT" : write(&errout, "# ", line)
+        "GN" : write(&errout, "# ", line)
+        "ID" : write(&errout, "# ", line)
+        "OS" : write(&errout, "# ", line)
+        "OX" : write(&errout, "# ", line)
+        }
+      if ="//" then {
+        if *tid["INTERACTION"] = 0
+          then delete(tid, "INTERACTION")
+        if *tid["ALTERNATIVE PRODUCTS"] = 0
+          then delete(tid, "ALTERNATIVE PRODUCTS")
+        suspend (parm["tid"] := tid)
+        tid := tid_init()
+        next
+        }
+      case move(3) of {
+        # AC   A1L190;
+        "AC " : {
+          tab(upto(any(&letters)))
+          tid["AC"] := [ ]
+          while put(
+            tid["AC"],
+            2( tab(many(' ')),
+              tab(upto(';')),
+              move(1)
+              )
+            )
+          }
+        # CC   -!- PTM: Tyrosine phosphorylated in response to IFN-alpha. Phosphorylationat Ser-287 negatively regulates the transcriptional response.{ECO:0000269|PubMed:1638633, ECO:0000269|PubMed:23139419,ECO:0000269|PubMed:7532278, ECO:0000269|PubMed:9121453}.
+        # CC   -!- FUNCTION: Major component of the transverse central element ofsynaptonemal complexes (SCS), formed between homologous chromosomesduring meiotic prophase. Required for chromosome loading of the centralelement-specific SCS proteins, and for initiating synapsis betweenhomologous chromosomes. Chromosome loading appears to require SYCP1.Required for fertility. {ECO:0000250|UniProtKB:B5KM66}.
+        # CC   -!- SUBUNIT: Homodimer. Interacts with SYCE1. Interacts with SYCE2.Interacts with proteasome subunit PSMA8; to participate in meiosisprogression during spermatogenesis (By similarity). Interacts withSPO16 (By similarity). {ECO:0000250|UniProtKB:B5KM66}.
+        # CC   -!- ALTERNATIVE PRODUCTS:  Event=Alternative splicing; Named isoforms=3;
+        # CC       Name=1; Synonyms=DIA-156; IsoId=O60879-1; Sequence=Displayed;
+        # CC       Name=2; Synonyms=DIA-12C, DIA2B; IsoId=O60879-2; Sequence=VSP_001573;
+        # CC       Name=3; Synonyms=DIA2C; IsoId=O60879-3; Sequence=VSP_012956, VSP_012955;
+        # CC   -!- INTERACTION:
+        # CC       A1L190; Q9UL45: BLOC1S6; NbExp=3; IntAct=EBI-10283466, EBI-465781;
+        # CC       A1L190; Q96CS2: HAUS1; NbExp=4; IntAct=EBI-10283466, EBI-2514791;
+        # CC   -!- SUBCELLULAR LOCATION: Nucleus {ECO:0000250|UniProtKB:B5KM66}.Chromosome {ECO:0000250|UniProtKB:B5KM66}. Note=Colocalizes with SYCE1in the central elements. {ECO:0000250|UniProtKB:B5KM66}.
+        "CC " : {
+          if ="  -!- ALTERNATIVE PRODUCTS:" | ="  -!- INTERACTION:"
+            then next
+          if ="  -!- "
+            then {
+              dashbang := tab(upto(':'))
+              /tid[dashbang] := [ ]
+              put(tid[dashbang], (tab(many(': ')), tab(0)))
+              next
+              }
+          tab(many(' '))
+          if match("Name=")
+            then {
+              put(tid["ALTERNATIVE PRODUCTS"], tab(0))
+              }
+            else {
+              ( acc1 := 1(tab(upto(';')), move(2)),
+                acc2 := tab(upto(':;')),
+                ix1  := (
+                  tab(find("IntAct=")),
+                  move(7),
+                  tab(upto(','))
+                  ),
+                ix2  := (
+                  move(2),
+                  tab(upto(';'))
+                  ),
+                L := if acc1 << acc2
+                  then [acc1, ix1, acc2, ix2]
+                  else [acc2, ix2, acc1, ix1],
+                (tid["INTERACTION"])[acc1||"_"||acc2] := L
+                )
+              }
+          }
+        # DB sp
+        "DB " : {
+          tid["DB"] := tab(0)
+          }
+        # DE   RecName: Full=Synaptonemal complex central element protein 3;
+        # DE   AltName: Full=Testis highly expressed gene 2 protein;
+        # DE            Short=THEG-2;
+        "DE " : {
+          tab(upto(&letters))
+          /tid["DE"] := [ ]
+          put(
+            tid["DE"],
+            (
+              ="EC" ||
+                (="=", " ") ||
+                tab(many(&digits ++ '.')) ||
+                (=";", tab(0), "")
+              )
+            ) | while
+                  put(
+                    tid["DE"],
+                    3(
+                      tab(find("=")),
+                      move(1),
+                      tab(find(" ENSP" | " {") | upto(';')),
+                      move(1)
+                      )
+                    ) | tid["DE Flags"] := 3(
+                          tab(find("Flags: ")),
+                          move(7),
+                          tab(upto(';')),
+                          move(1)
+                          )
+          }
+        # DR   Ensembl; ENST00000338305.7; ENSP00000345985.6; ENSG00000156564.9.
+        # DR   GO; GO:0072562; C:blood microparticle; HDA:UniProtKB.
+        # DR   GO; GO:0009986; C:cell surface; IDA:MGI.
+        "DR " : {
+          tab(upto(any(&letters)))
+          case 1(tab(upto(';')), move(2)) of {
+            "  Ensembl" : {
+              /tid["Ensembl"] := [ ]
+              put(tid["Ensembl"], tab(0))
+              }
+            "  GO" :{
+              /tid["GO"] := [ ]
+              put(tid["GO"], tab(0))
+              }
+              default: write("no match: ", line)
+            }
+          }
+        # FT   MOD_RES         30 /note='Phosphoserine' /evidence='ECO:0007744|PubMed:23186163'
+        "FT " : {
+          if tab(find("MOD_RES"))
+            then {
+              /tid["MOD_RES"] := [ ]
+              ( position := (tab(upto(&digits)), tab(many(&digits))),
+                residue :=
+                  case 3(
+                    tab(upto('\'')), move(1),
+                    tab(upto('\';'))
+                    )
+                    of {
+                    "Phosphoserine"    : "S"
+                    "Phosphothreonine" : "T"
+                    "Phosphotyrosine"  : "Y"
+                    default            : &fail
+                    },
+                put(tid["MOD_RES"], residue || position)
+                )
+              }
+          }
+        # GN   Name=SYCE3; Synonyms=C22orf41, THEG2;
+        "GN " : while {
+          ( tab(upto('=')) & move(1) & put(tid["GN"], tab(upto(',;'))) & move(1) ) |
+            ( tab(match(" ")) & put(tid["GN"], tab(upto(',;'))) & move(1) )
+          }
+        # ID   SYCE3_HUMAN             Reviewed;          88 AA.
+        "ID " : {
+          tab(many(' '))
+          tid["ID"] := tab(many(&letters ++ &digits ++ '_'))
+          }
+        # OS   Homo sapiens (Human).
+        "OS " : {
+          tab(many(' '))
+          tid["OS"] := tab(0)
+          }
+        # OX   NCBI_TaxID=9606 {Ensembl:ENSP00000489695, ECO:0000313|Proteomes:UP000005640};
+        "OX " : {
+          tab(many(' '))
+          ="NCBI_TaxID="
+          tid["OX"] := tab(many(&digits))
+          }
+        # SQ   SEQUENCE   1097 AA;  125043 MW;  EE15E9AC8C949229 CRC64;
+        "SQ " : {
+          tab(upto(&digits))
+          tid["SQ"] := tab(0)
+          }
+        default : tid["sequence"] := line
+        }
+      }
+    }
+  end
+
+procedure sl3_dml_prep()
+  write(parm["fout"], ".parameter init")
+  write(parm["fout"], "PRAGMA foreign_keys = ON;")
+  end
+
+procedure sl3_ddl_gen()
+  while suspend ![
+    "CREATE TABLE IF NOT EXISTS_
+    \n  upstr(_
+    \n    id  INTEGER PRIMARY KEY ON CONFLICT IGNORE,_
+    \n    str TEXT UNIQUE ON CONFLICT IGNORE_
+    \n    ); _
+    \nCREATE INDEX IF NOT EXISTS upstr_val_ix ON upstr(str);",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  uprt(_
+    \n    id          TEXT PRIMARY KEY ON CONFLICT IGNORE,_
+    \n    db          TEXT,_
+    \n    os_id       REFERENCES upstr(id),_
+    \n    ox          INTEGER,_
+    \n    sq          TEXT,_
+    \n    sequence_id REFERENCES upstr(id)_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  upacc(_
+    \n    id  INTEGER PRIMARY KEY,_
+    \n    acc TEXT,_
+    \n    CONSTRAINT acc_idx_
+    \n      UNIQUE (acc) ON CONFLICT IGNORE_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  uprt_upacc(_
+    \n    uprt_id  REFERENCES uprt(id),_
+    \n    upacc_id REFERENCES upacc(id),_
+    \n    CONSTRAINT prt_acc_idx_
+    \n      UNIQUE (uprt_id, upacc_id) ON CONFLICT IGNORE_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  upatr(_
+    \n    uprt_id REFERENCES uprt(id),_
+    \n    atr_id  REFERENCES upstr(id),_
+    \n    val_id  REFERENCES upstr(id),_
+    \n    CONSTRAINT atr_idx_
+    \n      UNIQUE (uprt_id, atr_id) ON CONFLICT IGNORE_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  upixn(_
+    \n    id TEXT PRIMARY KEY ON CONFLICT IGNORE,_
+    \n    acc1    REFERENCES upacc(acc),_
+    \n    acc2    REFERENCES upacc(acc),_
+    \n    ix1_id  REFERENCES upstr(id),_
+    \n    ix2_id  REFERENCES upstr(id),_
+    \n    CONSTRAINT ixn_idx_
+    \n      UNIQUE (acc1, acc2) ON CONFLICT IGNORE_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  uprt_upixn(_
+    \n    uprt_id  REFERENCES uprt(id),_
+    \n    upixn_id REFERENCES upixn(id),_
+    \n    CONSTRAINT prt_ixn_idx_
+    \n      UNIQUE (uprt_id, upixn_id) ON CONFLICT IGNORE_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  uplst(_
+    \n    id         INTEGER PRIMARY KEY,_
+    \n    uprt_id    REFERENCES uprt(id),_
+    \n    tid_key_id REFERENCES upstr(id),_
+    \n    tid_val_id REFERENCES upstr(id),_
+    \n    CONSTRAINT lst_idx_
+    \n      UNIQUE (uprt_id, tid_key_id, tid_val_id) ON CONFLICT IGNORE_
+    \n    ); _
+    \nCREATE INDEX IF NOT EXISTS uplst_atr_val_ix ON uplst(tid_key_id,tid_val_id); _
+    \nCREATE INDEX IF NOT EXISTS uplst_val_ix     ON uplst(tid_val_id);",
+
+    "CREATE VIEW IF NOT EXISTS _
+    \n  uprt_v _
+    \nAS _
+    \n  SELECT _
+    \n    i.id  AS id, _
+    \n    i.db  AS db, _
+    \n    o.str AS os, _
+    \n    i.ox  AS ox, _
+    \n    i.sq  AS sq, _
+    \n    s.str AS sequence _
+    \n  FROM _
+    \n    uprt i, _
+    \n    upstr AS o, _
+    \n    upstr AS s _
+    \n  WHERE _
+    \n    i.os_id = o.id _
+    \n  AND _
+    \n    i.sequence_id = s.id _
+    \n  ;",
+
+    "CREATE VIEW IF NOT EXISTS _
+    \n  upacc_uprt_v _
+    \nAS _
+    \n  SELECT _
+    \n    acc, _
+    \n    uprt_id _
+    \n  FROM _
+    \n    uprt_upacc, _
+    \n    upacc _
+    \n  WHERE _
+    \n    uprt_upacc.upacc_id = upacc.id _
+    \n  ;",
+
+    "CREATE VIEW IF NOT EXISTS _
+    \n  uplst_v _
+    \nAS _
+    \n  SELECT _
+    \n    l.uprt_id AS UniProtID, _
+    \n    k.str     AS Attribute, _
+    \n    v.str     AS Value, _
+    \n    l.id      AS SortID _
+    \n  FROM _
+    \n    uplst l, upstr k, upstr v _
+    \n  WHERE _
+    \n    k.id = l.tid_key_id _
+    \n  AND _
+    \n    v.id = l.tid_val_id _
+    \n  ;",
+
+    "CREATE VIEW upatr_v _
+    \nAS _
+    \n  SELECT _
+    \n    u.uprt_id AS UniProtID, _
+    \n    a.str AS Attribute, _
+    \n    v.str AS Value _
+    \n  FROM _
+    \n    upatr u, _
+    \n    upstr a, _
+    \n    upstr v _
+    \n  WHERE _
+    \n    a.id = u.atr_id _
+    \n  AND _
+    \n    v.id = u.val_id _
+    \n  ;",
+
+    "CREATE VIEW upatr_uplst_v _
+    \nAS _
+    \n  WITH _
+    \n    a(i, k, v) AS ( _
+    \n      SELECT UniProtID AS i, Attribute AS k, value AS v _
+    \n        FROM upatr_v _
+    \n        WHERE UniProtID = i order by k _
+    \n      ), _
+    \n    b(i, k, v) AS ( _
+    \n      SELECT UniProtID AS i, Attribute AS k, value AS v _
+    \n        FROM uplst_v _
+    \n        WHERE UniProtID = i _
+    \n      ) _
+    \n  SELECT c.id AS uniprotid, a.k AS attribute, a.v AS value _
+    \n    FROM a, uprt c WHERE c.id = a.i _
+    \n  UNION _
+    \n  SELECT c.id, b.k, b.v _
+    \n   FROM b, uprt c WHERE c.id = b.i _
+    \n    ;",
+
+    "CREATE VIEW uprt_upacc_v _
+    \nAS _
+    \n  SELECT upacc.acc AS Accession,  _
+    \n    uprt.id AS UniProtID,  _
+    \n    uprt.db,  _
+    \n    uprt.ox,  _
+    \n    uprt.sq  _
+    \n  FROM uprt  _
+    \n    LEFT JOIN uprt_upacc ON uprt.id = uprt_upacc.uprt_id  _
+    \n    LEFT JOIN upacc ON uprt_upacc.upacc_id = upacc.id _
+    \n    ;",
+
+    "CREATE VIEW uprt_upacc_accessions_v _
+    \nAS _
+    \n  SELECT _
+    \n      group_concat(accession) AS Accessions, _
+    \n      UniProtID, db, ox, sq _
+    \n    FROM uprt_upacc_v _
+    \n      GROUP BY UniProtID, db, ox, sq _
+    \n    ;"
+
+    ]
+  end
+
+
+
+procedure sl3_create_schema()
+  write(parm["fout"], "-- create schema tables, if necessary")
+  every write(parm["fout"], \sl3_ddl_gen())
+  end
+
+# WRITE within transaction
+
+procedure sl3_no_op()
+  return
+  end
+
+procedure sl3_put_no_trxn(strs[])
+  local builder
+  # initialize parm if sl_begin_no_trxn was not previously called
+  /parm["no_trxn"] := [ ]
+  builder := ""
+  every builder ||:= !strs
+  put(parm["no_trxn"], builder)
+  return builder
+  end
+
+procedure sl3_put_trxn(strs[])
+  local builder
+  builder := ""
+  every builder ||:= !strs
+  write(parm["fout"], builder)
+  return builder
+  end
+
+# BEGIN transaction
+
+procedure sl3_begin_no_trxn()
+  parm["no_trxn"] := [ ]
+  end
+
+procedure sl3_begin_trxn()
+  write( parm["fout"], "BEGIN TRANSACTION;")
+  end
+
+# ROLLBACK transaction
+
+procedure sl3_rollback_no_trxn()
+  parm["no_trxn"] := [ ]
+  write( parm["fout"],
+    "-- failed to insert data for",
+    "  ID: " || \parm["tid"]["ID"] | "(no ID found)",
+    "; SQ: " || \parm["tid"]["SQ"] | "; (no SQ found)"
+    )
+  end
+
+procedure sl3_rollback_trxn()
+  write( parm["fout"],
+    "ROLLBACK TRANSACTION; -- failed to insert data for",
+    "  ID: " || \parm["tid"]["ID"] | "(no ID found)",
+    "; SQ: " || \parm["tid"]["SQ"] | "; (no SQ found)"
+    )
+  end
+
+# COMMIT transaction
+
+procedure sl3_commit_no_trxn()
+  every write(parm["fout"], !parm["no_trxn"])
+  parm["no_trxn"] := [ ]
+  return
+  end
+
+procedure sl3_commit_trxn()
+  write(parm["fout"], "COMMIT TRANSACTION;")
+  return
+  end
+
+
+procedure sl3_bind(s, p)
+  if /s | /p | type(s) ~== type(p) ~== "string"
+    then {
+      write(&errout, &progname,
+        ": FATAL error - precondition violation in sl3_bind(s, p)")
+      write(&errout, "type(s) is ", type(s), "; s is:")
+      write(&errout, ximage(s))
+      write(&errout, "type(p) is ", type(p), "; p is:")
+      write(&errout, ximage(p))
+      write(&errout, "tid is:")
+      write(&errout, ximage(parm["tid"]))
+      fail
+      }
+  SL3_PUT(
+    sprintf(
+      ".parameter set %s \"'%s'\"", 
+      p, 
+      replacem(s, "\"", "\\\"", "'", "''")
+      )
+    )
+  return p
+  end
+
+procedure sl3_upstr_str_to_id(s, p)
+  if /s | /p | type(s) ~== type(p) ~== "string"
+    then {
+      write(&errout, &progname,
+        ": FATAL error - precondition violation in sl3_bind(s, p)")
+      write(&errout, "type(s) is ", type(s), "; s is:")
+      write(&errout, ximage(s))
+      write(&errout, "type(p) is ", type(p), "; p is:")
+      write(&errout, ximage(p))
+      write(&errout, "tid is:")
+      write(&errout, ximage(parm["tid"]))
+      fail
+      }
+  SL3_PUT(
+    sprintf("INSERT INTO upstr(str) VALUES (%s);", sl3_bind(s, p))
+    )
+  return sprintf("(SELECT id FROM upstr WHERE str = %s LIMIT 1)", p)
+  end
+
+procedure sl3_uprt_insert(tid)
+  local qry
+  qry := sprintf("INSERT INTO _
+    uprt (id, db, os_id, ox, sq, sequence_id) _
+      \nvalues (%s, %s, %s, %s, %s, %s);",
+    sl3_bind(tid["ID"], "@uprtid"),
+    sl3_bind(tid["DB"], "@uprtdb"),
+    sl3_upstr_str_to_id(tid["OS"], "@osid"),
+    sl3_bind(tid["OX"], "@uprtox"),
+    sl3_bind(tid["SQ"], "@uprtsq"),
+    sl3_upstr_str_to_id(\tid["sequence"], "@seqid")
+    ) | fail
+  DEBUG write(&errout, qry)
+  return SL3_PUT( qry)
+  end
+
+procedure sl3_upacc_acc_to_acc(acc, p_acc)
+  local qry
+  qry := sprintf("INSERT INTO _
+    upacc(acc) _
+      \nvalues (%s);",
+    sl3_bind(acc, p_acc)
+    ) | fail
+  SL3_PUT( qry)
+  DEBUG write(&errout, qry)
+  return p_acc
+  end
+
+procedure sl3_upacc_acc_to_id(acc, p_acc)
+  local qry
+  qry := sprintf("INSERT INTO _
+    upacc(acc) _
+      \nvalues (%s);",
+    sl3_bind(acc, p_acc)
+    ) | fail
+  SL3_PUT( qry)
+  DEBUG write(&errout, qry)
+  return sprintf("(SELECT id FROM upacc WHERE acc = %s LIMIT 1)", p_acc)
+  end
+
+procedure sl3_upixn_insert(tid)
+  local ixn, ixn_key, T_ixn, qry
+  #if T_ixn := \tid["INTERACTION"]
+  if T_ixn := \( ( \tid )["INTERACTION"] )
+    then
+      every (ixn_key := key(T_ixn), ixn := T_ixn[ixn_key]) do {
+        qry := sprintf("INSERT INTO upixn (id, acc1, acc2, ix1_id, ix2_id) _
+          \nvalues (%s, %s, %s, %s, %s);",
+          sl3_bind(ixn[1]||"_"||ixn[3], "@upixnid"),
+          sl3_upacc_acc_to_acc(ixn[1], "@acc1id"),
+          sl3_upacc_acc_to_acc(ixn[3], "@acc2id"),
+          sl3_upstr_str_to_id(ixn[2], "@ixn1id"),
+          sl3_upstr_str_to_id(ixn[4], "@ixn2id")
+          ) | fail
+        SL3_PUT( qry)
+        qry := sprintf("INSERT INTO uprt_upixn (uprt_id, upixn_id) _
+          \nvalues (%s, %s);",
+          sl3_bind(tid["ID"], "@uprtid"),
+          sl3_bind(ixn[1]||"_"||ixn[3], "@upixnid")
+          ) | fail
+        SL3_PUT( qry)
+        }
+  return
+  end
+
+procedure sl3_uprt_acc_insert(tid)
+  # precondition:
+  # - ID has already been inserted into DB
+  local L_acc, qry, acc
+  L_acc := tid["AC"]
+  every acc := !L_acc do {
+    qry := sprintf("INSERT INTO uprt_upacc (uprt_id, upacc_id) _
+      \nvalues (%s, %s);",
+      sl3_bind(tid["ID"], "@uprtid"),
+      sl3_upacc_acc_to_id(acc, "@upaccid")
+      ) | fail
+    SL3_PUT( qry)
+    }
+  return
+  end
+
+procedure sl3_uplst_insert(tid)
+  # precondition:
+  # - ID has already been inserted into DB
+  local itm, k, qry, v
+  every (k := key(tid), v <- tid[k]) do {
+    if type(v) == "list"
+      then
+        every itm := !v do {
+          type(itm) == "string" | fail
+          qry :=
+            sprintf("INSERT INTO uplst (uprt_id, tid_key_id, tid_val_id) _
+              \nvalues (%s, %s, %s);",
+              sl3_bind(           tid["ID"], "@uprtid"),
+              sl3_upstr_str_to_id(k,         "@uprtidkey"),
+              sl3_upstr_str_to_id(itm,       "@uprtidval")
+              )
+          SL3_PUT( qry)
+          }
+    }
+  return
+  end
+
+procedure sl3_upatr_insert(tid)
+  # precondition:
+  # - ID has already been inserted into DB
+  local k, qry, v
+  every (k := key(tid), v := tid[k]) do {
+    if ( type(v) == "string",
+         ("ID" | "DB" | "OS" | "OX" | "sequence" | "SQ") ~== v
+         )
+      then {
+        qry := sprintf("INSERT INTO upatr(uprt_id, atr_id, val_id) _
+          \nvalues (%s, %s, %s);",
+          sl3_bind(tid["ID"], "@uprtid"),
+          sl3_upstr_str_to_id(k, "@uprtidkey"),
+          sl3_upstr_str_to_id(v, "@uprtidval")
+          ) | {
+            write(&errout, &progname,
+              ": FATAL error, sl3_upatr_insert(tid)")
+            write(&errout, "type(k) is ", type(k), "; k is:")
+            write(&errout, ximage(k))
+            write(&errout, "type(v) is ", type(v), "; v is:")
+            write(&errout, ximage(v))
+            write(&errout, "tid is:")
+            write(&errout, ximage(parm["tid"]))
+            fail
+            }
+        SL3_PUT( qry)
+        }
+    }
+  return
+  end
+
+procedure sl3_tid(tid)
+  local k
+  BEGIN_TRANSACTION
+  ( SL3_PUT(
+      "-- insert UniProt ID and metadata into uprt table"),
+    sl3_uprt_insert(tid),
+    SL3_PUT(
+      "-- insert accessions for UniProt ID into upacc & uprt_upacc tables"),
+    sl3_uprt_acc_insert(tid),
+    SL3_PUT(
+      "-- insert interactions for UniProt ID into upixn & uprt_upixn tables"),
+    sl3_upixn_insert(tid),
+    SL3_PUT(
+      "-- insert attribute scalars for UniProt ID into upatr table"),
+    sl3_upatr_insert(tid),
+    SL3_PUT(
+      "-- insert attribute lists for UniProt ID into uplst table"),
+    sl3_uplst_insert(tid),
+    COMMIT_TRANSACTION
+    ) | ROLLBACK_TRANSACTION
+  DEBUG every k := key(tid) do {
+    write(&errout, k, " => ", ximage(tid[k]))
+    }
+  DEBUG SL3_PUT( ".dump")
+  end
+
+procedure ximage_tid(tid)
+  write(parm["fout"], ximage(tid))
+  end
+
+procedure xencode_tid(tid)
+  xencode(tid, parm["fout"])
+  end

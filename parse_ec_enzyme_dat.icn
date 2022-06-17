@@ -1,0 +1,776 @@
+############################################################################
+#
+# File: parse_ec_enzyme_dat.icn
+#
+# Subject: parse_ec_enzyme_dat.icn - Parse ENZYME data to SQLite statements
+#
+# Author: Arthur Eschenlauer (https://orcid.org/0000-0002-2882-0508)
+#
+# Date: 09 June 2022
+#
+############################################################################
+#
+# This file is in the public domain. Art Eschenlauer has waived all
+# copyright and related or neighboring rights to:
+#   parse_ec_enzyme_dat.icn - Parse ENZYME data to SQLite statements
+# For details, see:
+#   https://creativecommons.org/publicdomain/zero/1.0/
+#
+# If you require a specific license and public domain status is not
+# sufficient for your needs, please apply the MIT license, bearing
+# in mind that the copyright "claim" is solely to meet your requirements
+# and does not imply any restriction on use or copying by the author:
+#
+#   Copyright (c) 2020, Arthur Eschenlauer
+#
+#   Permission is hereby granted, free of charge, to any person obtaining
+#   a copy of this software and associated documentation files (the
+#   "Software"), to deal in the Software without restriction, including
+#   without limitation the rights to use, copy, modify, merge, publish,
+#   distribute, sublicense, and/or sell copies of the Software, and to
+#   permit persons to whom the Software is furnished to do so, subject
+#   to the following conditions:
+#
+#   The above copyright notice and this permission notice shall be
+#   included in all copies or substantial portions of the Software.
+#
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+#   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+#   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+#   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+#   BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+#   ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+#   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#   SOFTWARE.
+#
+############################################################################
+#
+# This program parses
+#   https://ftp.expasy.org/databases/enzyme/enzyme.dat
+# into SQL statements for inserting the data into a SQLite database.
+#
+# Usage:
+#   ./parse_ec_enzyme_dat -i inp -o out -s spc -f fmt -n -x \
+#                         -t trc -d dmp -debug -help
+# 
+# where (for all formats):
+#   -i inp = path to input file, or the "-" character for stdin
+#              If -i is not specified, the unnamed arguments
+#              are used if present; stdin is used otherwise.
+#   -o out = path to input file, or the '-' character for stdout
+#              If -o is not specified, the second unnamed argument
+#              is used if present; stdout is used otherwise.
+#   -s spc = UniProt species filter, e.g., 'HUMAN', 'MOUSE', etc..
+#              (by default, UniProt entries from all species are included)
+#   -f fmt = format, one of:
+#              "sql" - SQLite SQL (the default)
+#              "xencode" - robustly serialized Icon data structures:
+#                https://www2.cs.arizona.edu/icon/library/src/procs/xcodes.icn
+#              "ximage" - visually presented Icon data structures:
+#                https://www2.cs.arizona.edu/icon/library/src/procs/ximage.icn
+# 
+# and where (for SQL format):
+#   -t trc = integer as described for &dump on p. 180 of
+#              https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf
+#   -x     = use one transaction per UniProt ID when format is SQL
+#              (which may be five times slower)
+#   -n     = omit DDL (table and view creation statements) when format is SQL
+# 
+# and where (for debugging):
+#   -d dmp = integer as described for &dump on p. 196 of
+#              https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf
+#   -debug = print program debugging output
+#   -help  = print this help message and exit
+# 
+# All arguments are optional but only these named arguments are allowed.
+#
+############################################################################
+#
+# Links: codeobj, optinos, printf, strings, xcodes, ximage
+#
+############################################################################
+#
+
+link codeobj
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/codeobj.icn
+# for encode(s)
+
+link options
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/options.icn
+# for options(arg, optstring, errproc)
+#   option format: `-name%` where `%` is one of:
+#     ! No value is required or allowed
+#     : A string value is required
+#     + An integer value is required
+#     . A real value is required
+
+link printf
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/printf.icn
+# for sprintf(format, args[])
+#   This procedure behaves somewhat like the standard printf.
+#   Supports d, e, s, o, and x formats like printf.  An "r" format
+#  prints real numbers in a manner similar to that of printf's "f".
+#  Though "e" differs from printf in some details, it always produces
+#  exponential format.
+#    Left or right justification and field width control are provided
+#  as in printf.  %s, %r, and %e handle precision specifications.
+
+link strings
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/strings.icn
+# for replace(s1, s2, s3)
+#   Replaces all occurrences of s2 in s1 by s3; fails when s2 is null.
+# replacem(s, ...)
+#   Performs multiple replacements in the style of
+#   of replace(), where multiple argument pairs
+#   may be given, as in
+#     replacem(s, "a", "bc", "d", "cd")
+#   which replaces all "a"s by "bc"s and all
+#   "d"s by "cd"s.
+#   Replacements are performed one after another, not in parallel.
+
+link xcodes
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/xcodes.icn
+# for xencode(X, f)
+
+link ximage
+# ref: https://www2.cs.arizona.edu/icon/library/src/procs/ximage.icn
+# for ximage(X)
+
+global parm
+
+$define DEBUG if \parm["debug"] then
+$define BEGIN_TRANSACTION    parm["transaction begin"]() 
+$define COMMIT_TRANSACTION   parm["transaction commit"]() 
+$define ROLLBACK_TRANSACTION parm["transaction rollback"]() 
+$define SL3_PUT              parm["transaction put"]
+$define SL3_BEGIN_DML        parm["dml begin"]()
+$define SL3_END_DML          parm["dml end"]()
+$define SL3_CREATE_SCHEMA    parm["ddl"]()
+$define SL3_DML_INIT         sl3_dml_prep()
+
+procedure usage(s)
+  write("---")
+  write("This program parses")
+  write("  https://ftp.expasy.org/databases/enzyme/enzyme.dat")
+  write("into SQL statements for inserting the data into a SQLite database.")
+  write("\nUsage: ")
+  write("  ",&progname," -i inp -o out -s spc -f fmt -n -x -t trc -d dmp -debug -help")
+  write("\nwhere (for all formats):")
+  write("  -i inp = path to input file, or the \"-\" character for stdin")
+  write("             If -i is not specified, the unnamed arguments")
+  write("             are used if present; stdin is used otherwise.")
+  write("  -o out = path to input file, or the '-' character for stdout")
+  write("             If -o is not specified, the second unnamed argument")
+  write("             is used if present; stdout is used otherwise.")
+  write("  -s spc = UniProt species filter, e.g., 'HUMAN', 'MOUSE', etc..")
+  write("             (by default, UniProt entries from all species are included)")
+  write("  -f fmt = format, one of:")
+  write("             \"sql\" - SQLite SQL (the default)")
+  write("             \"xencode\" - robustly serialized Icon data structures:")
+  write("               https://www2.cs.arizona.edu/icon/library/src/procs/xcodes.icn")
+  write("             \"ximage\" - visually presented Icon data structures:")
+  write("               https://www2.cs.arizona.edu/icon/library/src/procs/ximage.icn")
+  write("\nand where (for SQL format):")
+  write("  -t trc = integer as described for &dump on p. 180 of")
+  write("             https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf")
+  write("  -x     = use one transaction per UniProt ID when format is SQL")
+  write("             (which may be five times slower)")
+  write("  -n     = omit DDL (table and view creation statements) when format is SQL")
+  write("\nand where (for debugging):")
+  write("  -d dmp = integer as described for &dump on p. 196 of")
+  write("             https://www2.cs.arizona.edu/icon/ftp/doc/lb2up.pdf")
+  write("  -debug = print program debugging output")
+  write("  -help  = print this help message and exit")
+  write("\nAll arguments are optional but only these named arguments are allowed.")
+  if \s then {
+    write("")
+    write("*** ERROR: ", \s, " ***")
+    }
+  stop("...")
+  end
+
+procedure main(args)
+  parm := options(args, "-debug! -help! -n! -x! -f: -i: -o: -s: -d+ -t+", usage)
+  if \parm["help"] then usage()
+  parm["args"] := args
+  &dump  := \parm["d"]
+  &trace := \parm["t"]
+  parm["fout"] := open("-" ~== \parm["o"] | \args[2], "w") | &output
+  parm["fin"]  :=
+    if parm["fout"] === &output
+      then create open("-" ~== \parm["i"] | \args[1], "r") | &input
+      else create open("-" ~== \parm["i"]) | every open(!args, "r")
+  /parm["f"] := "sql"
+
+  if \parm["x"]
+    then {
+      parm["transaction begin"]    := sl3_begin_trxn
+      parm["transaction commit"]   := sl3_commit_trxn
+      parm["transaction rollback"] := sl3_rollback_trxn
+      parm["transaction put"]      := sl3_put_trxn
+      parm["dml begin"]            := sl3_no_op
+      parm["dml end"]              := sl3_no_op
+      }
+    else {
+      parm["transaction begin"]    := sl3_begin_no_trxn
+      parm["transaction commit"]   := sl3_commit_no_trxn
+      parm["transaction rollback"] := sl3_rollback_no_trxn
+      parm["transaction put"]      := sl3_put_no_trxn
+      parm["dml begin"]            := sl3_begin_trxn
+      parm["dml end"]              := sl3_commit_trxn
+      }
+
+  parm["ddl"] :=
+    if parm["f"] == "sql" & /parm["n"]
+      then sl3_create_schema
+      else sl3_no_op
+
+  case parm["f"] of {
+    "sql"     : {
+      SL3_CREATE_SCHEMA
+      SL3_DML_INIT
+      SL3_BEGIN_DML
+      every sl3_tid(\tids_gen())
+      SL3_END_DML
+      }
+    "xencode" : every xencode_tid(\tids_gen())
+    "ximage"  : every ximage_tid(\tids_gen())
+    }
+
+  end
+
+# ref: https://ftp.expasy.org/databases/enzyme/enzuser.txt
+#
+#
+#   The entries  in the database data file (ENZYME.DAT) are structured so as
+#   to be  usable by  human readers  as well  as by  computer programs. Each
+#   entry in  the database  is composed  of lines. Different types of lines,
+#   each with  its own  format, are used to record the various types of data
+#   which make  up the  entry. The  general  structure  of  a  line  is  the
+#   following:
+#
+#   Characters    Content
+#   ----------    ----------------------------------------------------------
+#   1 to 2        Two-character line code. Indicates the type of information
+#                 contained in the line.
+#   3 to 5        Blank
+#   6 up to 78    Data
+#
+#   The currently  used line  types, along with their respective line codes,
+#   are listed below:
+#   lbl description                     term   cardinality
+#   ID  Identification                  $      (Begin, 1 per entry)
+#   DE  Description (official name)     .$     (>=1 per entry)
+#   AN  Alternate name(s)               .$     (>=0 per entry)
+#   CA  Catalytic activity              .$     (>=1 per entry)
+#   CF  Cofactor(s)                     .$     (>=0 per entry)
+#   CC  Comments                        .$     (>=0 per entry)
+#   PR  Cross-references to PROSITE     ;$     (>=0 per entry)
+#   DR  Cross-references to Swiss-Prot ';  '   (>=0 per entry)
+#                                   or ';$'
+#   //  Termination line                       (End, 1 per entry)
+#
+#   Line types no longer used:
+#   DI  Disease(s) associated with the enzyme
+#
+#   Some entries  do not  contain all of the line types, and some line types
+#   occur many  times in  a single  entry. Each  entry must  begin  with  an
+#   identification line (ID) and end with a terminator line (//).
+#
+#   Sample entries
+#
+#   ID   1.14.17.3
+#   DE   Peptidylglycine monooxygenase.
+#   AN   PAM.
+#   AN   Peptidyl alpha-amidating enzyme.
+#   AN   Peptidylglycine 2-hydroxylase.
+#   AN   Peptidylglycine alpha-amidating monooxygenase.
+#   CA   Peptidylglycine + ascorbate + O(2) = peptidyl(2-hydroxyglycine) +
+#   CA   dehydroascorbate + H(2)O.
+#   CF   Copper.
+#   CC   -!- Peptidylglycines with a neutral amino acid residue in the penultimate
+#   CC       position are the best substrates for the enzyme.
+#   CC   -!- The product is unstable and dismutates to glyoxylate and the
+#   CC       corresponding desglycine peptide amide, a reaction catalyzed by
+#   CC       EC 4.3.2.5.
+#   CC   -!- Involved in the final step of biosynthesis of alpha-melanotropin and
+#   CC       related biologically active peptides.
+#   PR   PROSITE; PDOC00080;
+#   DR   P08478, AMD1_XENLA ;  P12890, AMD2_XENLA ;  P83388, AMDL_CAEEL ;
+#   DR   P10731, AMD_BOVIN  ;  P19021, AMD_HUMAN  ;  P97467, AMD_MOUSE  ;
+#   DR   P14925, AMD_RAT    ;  Q95XM2, PHM_CAEEL  ;  O01404, PHM_DROME  ;
+#   //
+#
+#   ID   2.3.1.43
+#   DE   Phosphatidylcholine--sterol O-acyltransferase.
+#   AN   LCAT.
+#   AN   Lecithin--cholesterol acyltransferase.
+#   AN   Phospholipid--cholesterol acyltransferase.
+#   CA   Phosphatidylcholine + a sterol = 1-acylglycerophosphocholine +
+#   CA   a sterol ester.
+#   CC   -!- Palmitoyl, oleoyl, and linoleoyl can be transferred; a number of
+#   CC       sterols, including cholesterol, can act as acceptors.
+#   CC   -!- The bacterial enzyme also catalyzes the reactions of EC 3.1.1.4 and
+#   CC       EC 3.1.1.5.
+#   PR   PROSITE; PDOC00110;
+#   DR   P10480, GCAT_AERHY ;  P53760, LCAT_CHICK ;  O35573, LCAT_ELIQU ;
+#   DR   P04180, LCAT_HUMAN ;  O35724, LCAT_MICMN ;  P16301, LCAT_MOUSE ;
+#   DR   O35502, LCAT_MYOGA ;  Q08758, LCAT_PAPAN ;  P30930, LCAT_PIG   ;
+#   DR   P53761, LCAT_RABIT ;  P18424, LCAT_RAT   ;  O35840, LCAT_TATKG ;
+#   //
+#
+#   ID   1.1.1.86
+#   DE   Ketol-acid reductoisomerase (NADP(+)).
+#   AN   Acetohydroxy acid isomeroreductase.
+#   AN   Alpha-keto-beta-hydroxylacyl reductoisomerase.
+#   AN   Dihydroxyisovalerate dehydrogenase (isomerizing).
+#   CA   (1) (2R)-2,3-dihydroxy-3-methylbutanoate + NADP(+) = (2S)-2-hydroxy-2-
+#   CA   methyl-3-oxobutanoate + NADPH.
+#   CA   (2) (2R,3R)-2,3-dihydroxy-3-methylpentanoate + NADP(+) = (S)-2-hydroxy-2-
+#   CA   ethyl-3-oxobutanoate + NADPH.
+#   CC   -!- The enzyme, found in many bacteria and archaea, is specific for NADPH
+#   CC       (cf. EC 1.1.1.382 and EC 1.1.1.383).
+#   CC   -!- Formerly EC 1.1.1.89.
+#   DR   Q05758, ILV5_ARATH ;  P38674, ILV5_NEUCR ;  Q65XK0, ILV5_ORYSJ ;
+#   DR   O82043, ILV5_PEA   ;  P84534, ILV5_POPEU ;  P78827, ILV5_SCHPO ;
+#   ...
+#   //
+
+# record for building tid
+record tid_build(
+  k, # key, optional
+  t, # list of terminators
+  d, # discard terminator if not null
+  s, # line under construction, or &null
+  L) # list of instances of key
+
+procedure tid_init()
+  local tid
+  tid := table()
+  # one member per line  k     t       d  s    L
+  tid["AN"] := tid_build("AN", ["."] , 1, "", [ ])
+  tid["CA"] := tid_build("CA", ["."] , 1, "", [ ])
+  tid["CC"] := tid_build("CC", ["."] ,  , "", [ ])
+  tid["CF"] := tid_build("CF", ["."] , 1, "", [ ])
+  tid["DE"] := tid_build("DE", ["."] , 1, "", [ ])
+  tid["DR"] := tid_build("DR", [";",    
+                               ";  "],  , "", [ ])
+  tid["PR"] := tid_build("PR", [";"] , 1, "", [ ])
+  tid["//"] := tid_build("//",       ,  ,   ,    )
+  return tid
+  end
+
+procedure tid_add(tid, line)
+  local lbl, elmnt, s, hat, dol
+  line ? {
+    lbl := move(2) |
+      fail
+    elmnt := \tid[lbl] | "ID" == lbl |
+      fail
+    ="   " |
+      "//" == lbl |
+      fail
+    case lbl of {
+      "ID" : tid["ID"] := tab(0)
+      "//" : return tid_term(tid)
+      "CC" : (
+        ( hat := ="-!- " ) | ="    ",
+        if s := 1( tab(find(elmnt.t[1])) || =elmnt.t[1],
+                  pos(0)
+                  )
+          then (
+            put(elmnt.L, elmnt.s || (if \hat | elmnt.s[-1] == "-" then "" else " ") || s),
+            elmnt.s := ""
+            )
+          else
+            elmnt.s ||:= (if *elmnt.s = 0 | elmnt.s[-1] == "-" then "" else " ") || tab(0)
+        )
+      "DR" :
+        while
+          put(
+            elmnt.L,
+            trim(
+              1(
+                tab(find(elmnt.t[2])),
+                tab(many(' ')) | "",
+                =elmnt.t[2]
+                )
+              )
+            ) |
+          put(
+            elmnt.L,
+            trim(
+              1(
+                tab(find(elmnt.t[1])),
+                =elmnt.t[1],
+                tab(many(' ')) | "",
+                pos(0)
+                )
+              )
+            ) |
+          fail
+      "FOOBAR" : (
+        s := "",
+        elmnt.s <- elmnt.s || (
+          1( tab(find(elmnt.t[1])), s := =elmnt.t[1], pos(0) ) |
+            fail
+            ),
+        s := if \elmnt.d then "" else s,
+        put(elmnt.L, elmnt.s || s),
+        elmnt.s := ""
+        )
+      default : (
+        if s := 1( tab(find(elmnt.t[1])),
+                  dol := =elmnt.t[1],
+                  pos(0)
+                  )
+          then (
+            put(
+              elmnt.L,
+              trim(
+                elmnt.s ||
+                ( if *elmnt.s = 0 | elmnt.s[-1] == "-" then "" else " ") ||
+                  s || if \elmnt.d then "" else (\dol | "")
+                  )
+              ),
+            elmnt.s := ""
+            )
+          else
+            elmnt.s ||:= (
+              if *elmnt.s = 0 | elmnt.s[-1] == "-" then "" else " "
+              ) || tab(0)
+        )
+      }
+    }
+  end
+
+procedure tid_term(tid)
+  local T, L, rslT, s, spc
+  rslT := table()
+  rslT["EC"] := \tid["ID"] | fail
+  rslT["AlternateName"] := tid["AN"].L
+  rslT["CatalyticActivity"] := tid["CA"].L
+  rslT["Comment"] := tid["CC"].L
+  rslT["Cofactor"] := tid["CF"].L
+  if 1 ~= *tid["DE"].L then {
+    write(&errout, ximage(tid))
+    stop("unexpected DE field")
+    }
+  rslT["Name"] := tid["DE"].L[1]
+  # extract prosite ID from, e.g., "PROSITE; PDOC00058;"
+  L := [ ]
+  every s := !tid["PR"].L
+    do put(L, s ? (="PROSITE; ", tab(-1)))
+  rslT["PROSITE"] := L
+  # filter UniProt records by species pattern if provided
+  T := table()
+  if spc := \parm["s"]
+    then every s := !tid["DR"].L
+      do s ? T[tab(find(", "))] := (=", ", tab(find("_"||spc)) || tab(0))
+    else every s := !tid["DR"].L
+      do s ? T[tab(find(", "))] := (=", ", tab(0))
+  if (\parm["s"], *T = 0) then return &null
+  rslT["UniProt"] := T
+  return rslT
+  end
+
+
+procedure tids_gen()
+  local fin, tid, line
+  local residue, position
+  local acc1, acc2, ix1, ix2, L
+  local dashbang
+  while fin  := @parm["fin"] do {
+    tid := tid_init()
+    while line := read(fin) do {
+      suspend tid_add(tid, line) do tid := tid_init()
+      }
+    }
+  end
+
+procedure sl3_dml_prep()
+  write(parm["fout"], ".parameter init")
+  write(parm["fout"], "PRAGMA foreign_keys = ON;")
+  end
+
+procedure sl3_ddl_gen()
+  while suspend ![
+    "CREATE TABLE IF NOT EXISTS_
+    \n  ecstr(_
+    \n    id  INTEGER PRIMARY KEY ON CONFLICT IGNORE,_
+    \n    str TEXT UNIQUE ON CONFLICT IGNORE_
+    \n    );",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  ec(_
+    \n    ec         TEXT PRIMARY KEY ON CONFLICT IGNORE,_
+    \n    name       TEXT_
+    \n    ); _
+    \nCREATE INDEX IF NOT EXISTS ec_name_idx ON ec(name);",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  eclst(_
+    \n    id         INTEGER PRIMARY KEY,_
+    \n    ec_id      REFERENCES ec(ec),_
+    \n    tid_key_id REFERENCES ecstr(id),_
+    \n    tid_val    TEXT,_
+    \n    CONSTRAINT eclst_idx_
+    \n      UNIQUE (ec_id, tid_key_id, tid_val) ON CONFLICT IGNORE_
+    \n    ); _
+    \nCREATE INDEX IF NOT EXISTS eclst_atrval_ix ON eclst(tid_key_id,tid_val); _
+    \nCREATE INDEX IF NOT EXISTS eclst_atr_ix    ON eclst(tid_key_id); _
+    \nCREATE INDEX IF NOT EXISTS eclst_val_ix    ON eclst(tid_val);",
+
+    "CREATE TABLE IF NOT EXISTS_
+    \n  ec_up(_
+    \n    id         INTEGER PRIMARY KEY,_
+    \n    ec_id      REFERENCES ec(ec),_
+    \n    upacc,     -- WEAK REF upacc(acc),_
+    \n    uprt_id,   -- WEAK REF uprt(id),_
+    \n    CONSTRAINT ec_up_idx_
+    \n      UNIQUE (ec_id, upacc, uprt_id) ON CONFLICT IGNORE_
+    \n    ); _
+    \nCREATE INDEX IF NOT EXISTS ec_up_acc_uprt_ix ON ec_up(upacc, uprt_id); _
+    \nCREATE INDEX IF NOT EXISTS ec_up_ec_id_ix    ON ec_up(ec_id); _
+    \nCREATE INDEX IF NOT EXISTS ec_up_uprt_ix     ON ec_up(uprt_id);",
+
+    "CREATE VIEW IF NOT EXISTS _
+    \n  eclst_v _
+    \nAS _
+    \n  SELECT _
+    \n    l.id      AS SortID, _
+    \n    l.ec_id   AS EC, _
+    \n    k.str     AS Attribute, _
+    \n    l.tid_val AS Value _
+    \n  FROM _
+    \n    eclst l, ecstr k _
+    \n  WHERE _
+    \n    k.id = l.tid_key_id _
+    \n  ;",
+
+    "CREATE VIEW IF NOT EXISTS _
+    \n    ec_name_lut_v _
+    \nAS _
+    \n  SELECT _
+    \n    i.EC, _
+    \n    i.Attribute, _
+    \n    i.Value, _
+    \n    j.upacc AS Accession, _
+    \n    j.uprt_ID AS UniProtID _
+    \n  FROM _
+    \n    ec_up j, _
+    \n    ( SELECT * _
+    \n      FROM   eclst_v _
+    \n      WHERE  Attribute = 'Name' OR Attribute = 'AlternateName' _
+    \n      ) i _
+    \n  WHERE _
+    \n    i.EC = j.ec_id _
+    \n  ;",
+
+    ]
+  end
+
+
+
+procedure sl3_create_schema()
+  write(parm["fout"], "-- create schema tables, if necessary")
+  every write(parm["fout"], \sl3_ddl_gen())
+  end
+
+# WRITE within transaction
+
+procedure sl3_no_op()
+  return
+  end
+
+procedure sl3_put_no_trxn(strs[])
+  local builder
+  # initialize parm if sl_begin_no_trxn was not previously called
+  /parm["no_trxn"] := [ ]
+  builder := ""
+  every builder ||:= !strs
+  put(parm["no_trxn"], builder)
+  return builder
+  end
+
+procedure sl3_put_trxn(strs[])
+  local builder
+  builder := ""
+  every builder ||:= !strs
+  write(parm["fout"], builder)
+  return builder
+  end
+
+# BEGIN transaction
+
+procedure sl3_begin_no_trxn()
+  parm["no_trxn"] := [ ]
+  end
+
+procedure sl3_begin_trxn()
+  write( parm["fout"], "BEGIN TRANSACTION;")
+  end
+
+# ROLLBACK transaction
+
+procedure sl3_rollback_no_trxn()
+  parm["no_trxn"] := [ ]
+  write( parm["fout"],
+    "-- failed to insert data for",
+    "  EC: " || \parm["tid"]["EC"] | "(no EC found)",
+    "; Name: " || \parm["tid"]["Name"] | "; (no Name found)"
+    )
+  end
+
+procedure sl3_rollback_trxn()
+  write( parm["fout"],
+    "ROLLBACK TRANSACTION; -- failed to insert data for",
+    "  EC: " || \parm["tid"]["EC"] | "(no EC found)",
+    "; Name: " || \parm["tid"]["Name"] | "; (no Name found)"
+    )
+  end
+
+# COMMIT transaction
+
+procedure sl3_commit_no_trxn()
+  every write(parm["fout"], !parm["no_trxn"])
+  parm["no_trxn"] := [ ]
+  return
+  end
+
+procedure sl3_commit_trxn()
+  write(parm["fout"], "COMMIT TRANSACTION;")
+  return
+  end
+
+
+procedure sl3_bind(s, p)
+  if /s | /p | type(s) ~== type(p) ~== "string"
+    then {
+      write(&errout, &progname,
+        ": FATAL error - precondition violation in sl3_bind(s, p)")
+      write(&errout, "type(s) is ", type(s), "; s is:")
+      write(&errout, ximage(s))
+      write(&errout, "type(p) is ", type(p), "; p is:")
+      write(&errout, ximage(p))
+      write(&errout, "tid is:")
+      write(&errout, ximage(parm["tid"]))
+      fail
+      }
+  SL3_PUT(
+    sprintf(
+      ".parameter set %s \"'%s'\"", 
+      p, 
+      replacem(s, "\"", "\\\"", "'", "''")
+      )
+    )
+  return p
+  end
+
+procedure sl3_str_to_id(s, p)
+  if /s | /p | type(s) ~== type(p) ~== "string"
+    then {
+      write(&errout, &progname,
+        ": FATAL error - precondition violation in sl3_bind(s, p)")
+      write(&errout, "type(s) is ", type(s), "; s is:")
+      write(&errout, ximage(s))
+      write(&errout, "type(p) is ", type(p), "; p is:")
+      write(&errout, ximage(p))
+      write(&errout, "tid is:")
+      write(&errout, ximage(parm["tid"]))
+      fail
+      }
+  SL3_PUT(
+    sprintf("INSERT INTO ecstr(str) VALUES (%s);", sl3_bind(s, p))
+    )
+  return sprintf("(SELECT id FROM ecstr WHERE str = %s LIMIT 1)", p)
+  end
+
+procedure sl3_ec_insert(tid)
+  local qry
+  qry := sprintf("INSERT INTO _
+    ec(ec, name) _
+      \nvalues (%s, %s);",
+    sl3_bind(tid["EC"], "@ecid"),
+    sl3_bind(tid["Name"], "@ecname"),
+    ) | fail
+  DEBUG write(&errout, qry)
+  return SL3_PUT( qry)
+  end
+
+procedure sl3_eclst_insert(tid)
+  # precondition:
+  # - EC has already been inserted into DB
+  local itm, k, qry, v
+  every (k := key(tid), v <- tid[k]) do {
+    if type(v) == "list"
+      then
+        every itm := !v do {
+          type(itm) == "string" | fail
+          qry :=
+            sprintf("INSERT INTO eclst(ec_id, tid_key_id, tid_val) _
+              \nvalues (%s, %s, %s);",
+              sl3_bind     (tid["EC"], "@ecid"   ),
+              sl3_str_to_id(k        , "@ecidkey"),
+              sl3_bind     (itm      , "@ecidval")
+              )
+          SL3_PUT( qry)
+          }
+    }
+  qry :=
+    sprintf("INSERT INTO eclst(ec_id, tid_key_id, tid_val) _
+      \nvalues (%s, %s, %s);"  ,
+      sl3_bind     (tid["EC"]  , "@ecid"   ),
+      sl3_str_to_id("Name"     , "@ecidkey"),
+      sl3_bind     (tid["Name"], "@ecidval")
+      )
+  SL3_PUT( qry)
+  return
+  end
+
+procedure sl3_ec_up_insert(tid)
+  # precondition:
+  # - EC has already been inserted into DB
+  local T, itm, k, qry, v
+  type(T := \tid["UniProt"]) == "table" | fail
+  every (k := key(T), v <- T[k]) do {
+    type(k) == type(v) == "string" | fail
+    qry :=
+      sprintf("INSERT INTO ec_up(ec_id, upacc, uprt_id) _
+        \nvalues (%s, %s, %s);",
+        sl3_bind(tid["EC"], "@ecid"   ),
+        sl3_bind(k        , "@ecidkey"),
+        sl3_bind(v        , "@ecidval")
+        )
+    SL3_PUT( qry)
+    }
+  return
+  end
+
+procedure sl3_tid(tid)
+  local k
+  BEGIN_TRANSACTION
+  ( SL3_PUT(
+      "-- insert UniProt ID and metadata into ec table"),
+    sl3_ec_insert(tid),
+    SL3_PUT(
+      "-- insert attribute lists for UniProt ID into eclst table"),
+    sl3_eclst_insert(tid),
+    SL3_PUT(
+      "-- insert ec_up joins for UniProt ID into eclst table"),
+    sl3_ec_up_insert(tid),
+    COMMIT_TRANSACTION
+    ) | ROLLBACK_TRANSACTION
+  DEBUG every k := key(tid) do {
+    write(&errout, k, " => ", ximage(tid[k]))
+    }
+  DEBUG SL3_PUT( ".dump")
+  end
+
+procedure ximage_tid(tid)
+  write(parm["fout"], ximage(\tid))
+  end
+
+procedure xencode_tid(tid)
+  xencode(tid, parm["fout"])
+  end
