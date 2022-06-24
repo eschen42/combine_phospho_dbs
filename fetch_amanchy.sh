@@ -280,6 +280,7 @@ xform_hprd_motifs ()
     s/BARD1 BRCT/BARD1 Q99728/;
     /(R|K)[.]R[.][.]pS/ s/\tMAPKAPK1\t/\tRSK-1|RSK-2|RSK_group\t/;
     /RRR[.]pS/ s/\tMAPKAPK1\t/\tRSK_group\t/;
+    /(L|F|I)...R(Q|S|T)L((pS|pT)(M|L|I|V)/ s/((/(/;
     s/\tMDC1 BRCT\t/\tMDC1 FHA\t/;
     s/\tMLCK\t/\tMLCK_group\t/;
     s/\(F..F(pS|pT)(F|Y)\t\)PDK1\t/\1PDK-1\t/;
