@@ -175,7 +175,7 @@ eventually appear here).
 ## Logical design diagram
 
 The logical design for the database file specified by `UNIPROT_PROTEOME_SQLITE`
+(i.e., the database that has entries parsed from UniProt and ENZYME)
 may be viewed (or updated) by opening the `ParsedUniProtKB.dia` file in
 [the Dia drawing program](https://en.wikipedia.org/wiki/Dia_(software)).
-
-This is the database that has entries parsed from UniProt and ENZYME.
+Here is a (hopefully up-to-date) ![PDF export](ParsedUniProtKB.pdf?raw=true).
