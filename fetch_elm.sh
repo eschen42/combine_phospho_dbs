@@ -103,14 +103,15 @@ DISCARD=${URL_PHOSPHO_ELM_DUMP_VERTEBRATES:?' You must define this variable in u
 #ACE DISCARD=${URL_ELM_INTERACTIONS:?' You must define this variable in urls_to_fetch.sh'}
 
 
-PHOSPHOELM_IMP_SQL=phosphoelm_kin_bind.sql
-PHOSPHOELM_TABULAR=phosphoelm_kin_bind_detail.tabular
- PHOSPHOELM_SQLITE=${PHOSPHOELM_SQLITE:-phosphoelm_kin_bind.sqlite}
- PHOSPHOELM_DETAIL=phosphoelm_kin_bind.detail
-   PHOSPHOELM_TASK=phosphoelm_kin_bind.task
-       ELM_CLASSES=elm_phospho_classes.tsv
-PHOSPHOELM_KINASES=phospho_elm_kinases
-PHOSPHOELM_DOMAINS=phospho_elm_domains
+  PHOSPHOELM_IMP_SQL=phosphoelm_kin_bind.sql
+  PHOSPHOELM_TABULAR=phosphoelm_kin_bind_detail.tabular
+   PHOSPHOELM_SQLITE=${PHOSPHOELM_SQLITE:-phosphoelm_kin_bind.sqlite}
+   PHOSPHOELM_DETAIL=phosphoelm_kin_bind.detail
+     PHOSPHOELM_TASK=phosphoelm_kin_bind.task
+         ELM_CLASSES=elm_phospho_classes.tsv
+  PHOSPHOELM_KINASES=phospho_elm_kinases
+  PHOSPHOELM_DOMAINS=phospho_elm_domains
+PHOSPHOELM_KINDETAIL=phosphoelm_kinase_upid_desc.lut
 #ACE  ELM_INTERACTIONS=elm_interactions.tsv
 
 ############################################################################
@@ -458,6 +459,7 @@ xform_domains ()
 xform_kinases ${PHOSPHOELM_KINASES}.html ${PHOSPHOELM_KINASES}.tabular
 xform_domains ${PHOSPHOELM_DOMAINS}.html ${PHOSPHOELM_DOMAINS}.tabular
 
+cut -f 1,3,6 ${PHOSPHOELM_KINASES}.tabular | sed -e '1 s/^/kinase_/;' > ${PHOSPHOELM_KINDETAIL}
 
 # Don't run the next curl command unless you have submitted your agreement
 # to the "academic" (i.e., non-commercial use) license at:
