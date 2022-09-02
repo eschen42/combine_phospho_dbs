@@ -138,7 +138,7 @@ if [ ! -e ${ELM_CLASSES} ]; then
   fi
 
 # you can fetch ELM switches if desired:
-#curl -o switches.fetch  ${URL_PHOSPHO_ELM_KINASES}
+#curl -o switches.fetch  ${URL_PHOSPHO_ELM_SWITCHES}
 
 ############################################################################
 

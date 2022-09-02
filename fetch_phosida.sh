@@ -97,7 +97,7 @@ ${SQ} ${DB} "drop table if exists phosida;"
 ${SQ} ${DB} "drop table if exists citation;"
 ${SQ} ${DB} "${CITTBL_CREATE}"
 ${SQ} ${DB} "
-  ${CITTBL_INSERT_TBL_URL_ATTRB}
+  ${CITTBL_INSERT}
     (
       'phosida',
       '${LICENSE_URL_PHOSIDA}',

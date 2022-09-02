@@ -6,19 +6,26 @@ export UNIPROT_PROTEOME=${UNIPROT_PROTEOME:?'set the UNIPROT_PROTEOME environmen
 export UNIPROT_PROTEOME_NO_OX="$(echo ${UNIPROT_PROTEOME} | sed -e 's/_.*//')"
 
 ###################################
-# paths to output DB go here, or comment them out to use the defaults
+# table-names within PHOSPHO_AGGREGATE_SQLITE SQLite DB go here
+
+ENSEMBL_UNIPROT_TABLE=${ENSEMBL_UNIPROT_TABLE:-ensembl_pro_uniprot_lut}
+UNIPROT_ATTR_TABLE=${UNIPROT_ATTR_TABLE:-uniprot_attrib_lut}
+
+# paths to output DBs go here, or comment them out to use the defaults
+
 PHOSPHOELM_SQLITE=${PHOSPHOELM_SQLITE:-phosphoelm_kin_bind.sqlite}
 NETWORKIN_SQLITE=${NETWORKIN_SQLITE:-networkin.sqlite}
 PHOSIDA_SQLITE=${PHOSIDA_SQLITE:-phosida_motifs.sqlite}
 UNIPROT_XREF_SQLITE=${UNIPROT_XREF_SQLITE:-${SPECIES}_uniprot_xref.sqlite}
 UNIPROT_PROTEOME_SQLITE=${UNIPROT_PROTEOME_SQLITE:-${UNIPROT_PROTEOME}.sqlite}
-PHOSPHO_AGGREGATE_SQLITE=${PHOSPHO_AGGREGATE_SQLITE:-'combined_phospho_dbs.sqlite'}
-PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT=${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT:-'elm_networkin_psp_uniprot_lut'}
+PHOSPHO_AGGREGATE_SQLITE=${PHOSPHO_AGGREGATE_SQLITE:-combined_phospho_dbs.sqlite}
+PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT=${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT:-elm_networkin_psp_uniprot_lut}
+
 
 ###################################
 # commands create citation table in aggregation database
-export CITTBL_CREATE='CREATE TABLE IF NOT EXISTS citation(table_name TEXT NOT NULL, url TEXT NOT NULL, attribution TEXT NOT NULL, terms TEXT, derivation TEXT, UNIQUE(table_name, url, attribution) ON CONFLICT REPLACE);'
-export CITTBL_INSERT_TBL_URL_ATTRB='INSERT INTO citation(table_name, url, attribution, terms, derivation) VALUES '
+export CITTBL_CREATE='CREATE TABLE IF NOT EXISTS citation(table_name TEXT NOT NULL, license_reference_url TEXT NOT NULL, attribution TEXT NOT NULL, terms TEXT, derivation TEXT, UNIQUE(table_name, license_reference_url, attribution) ON CONFLICT REPLACE);'
+export CITTBL_INSERT='INSERT INTO citation(table_name, license_reference_url, attribution, terms, derivation) VALUES '
 export CITTBL_DERIVED_NO='primary'
 export CITTBL_DERIVED_YES='derived'
 
@@ -95,9 +102,6 @@ export LICENSE_URL_UNIPROT='https://www.uniprot.org/help/publications'
 export LICENSE_ATTRIBUTION_UNIPROT='UniProt Consortium. UniProt: the universal protein knowledgebase in 2021. Nucleic Acids Res. 2021 Jan 8;49(D1):D480-D489, DOI: 10.1093/nar/gkaa1100.  PMID: 33237286.'
 export LICENSE_TERMS_UNIPROT='UniProt data are covered by version 4 of the Creative Commons Shared Attribution License (CC-SA 4.0, https://creativecommons.org/licenses/by/4.0/).'
 
-# export UNIPROT_PROTEOME=${UNIPROT_PROTEOME:?'set the UNIPROT_PROTEOME environment variable (e.g., UP000005640_9606) before sourcing urls_to_fetch.sh'}
-# export UNIPROT_PROTEOME_NO_OX="$(echo ${UNIPROT_PROTEOME} | sed -e 's/_.*//')"
-
 export URL_UNIPROT_API='https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase'
 export  URL_UNIPROT_IDMAPPING_SELECTED="${URL_UNIPROT_API}/idmapping/by_organism/${SPECIES}_idmapping_selected.tab.gz"
 export           URL_UNIPROT_IDMAPPING="${URL_UNIPROT_API}/idmapping/by_organism/${SPECIES}_idmapping.dat.gz"
@@ -109,6 +113,9 @@ export               URL_UNIPROT_FASTA="${URL_UNIPROT_API}/reference_proteomes/E
 export    URL_UNIPROT_FASTA_ADDITIONAL="${URL_UNIPROT_API}/reference_proteomes/Eukaryota/${UNIPROT_PROTEOME_NO_OX}/${UNIPROT_PROTEOME}_additional.fasta.gz"
 export         UNIPROT_PROTEOME_SQLITE=${UNIPROT_PROTEOME_SQLITE:-${UNIPROT_PROTEOME}.sqlite}
 export             UNIPROT_XREF_SQLITE=${UNIPROT_XREF_SQLITE:-${SPECIES}_uniprot_xref.sqlite}
+export             ENSEMBL_UNIPROT_LUT=${ENSEMBL_UNIPROT_LUT:-${SPECIES}_${ENSEMBL_UNIPROT_TABLE}}
+export                UNIPROT_ATTR_LUT=${UNIPROT_ATTR_LUT:-${SPECIES}_uniprot_GN_DB_DE_ID_AC_MOD_lut}
+export               UNIPROT_ATTR_LIST=${UNIPROT_ATTR_LIST:-"'GN', 'DB', 'DE', 'ID', 'AC', 'MOD_RES', 'PTM'"}
 
 ###################################
 #
@@ -156,8 +163,17 @@ export URL_EC_DAT='https://ftp.expasy.org/databases/enzyme/enzyme.dat'
 ###################################
 # ('elm_networkin_psp_uniprot_lut', '${LICENSE_URL_PHOSPHO_AGGREGATE_SQLITE}', '${LICENSE_ATTRIBUTION_PHOSPHO_AGGREGATE_SQLITE}', '${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE}', '"${CITTBL_DERIVED_NO}"')
 # database name and citation table entries for the aggregated extracted data
-export PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT=${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT:-'elm_networkin_psp_uniprot_lut'}
-export PHOSPHO_AGGREGATE_SQLITE=${PHOSPHO_AGGREGATE_SQLITE:-'combined_phospho_dbs.sqlite'}
+export PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT=${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT:-elm_networkin_psp_uniprot_lut}
+export PHOSPHO_AGGREGATE_SQLITE=${PHOSPHO_AGGREGATE_SQLITE:-combined_phospho_dbs.sqlite}
+export KINASE_NAME_UNIPROT_LUT=${KINASE_NAME_UNIPROT_LUT:-kinase_name_uniprot_lut}
+export KINASE_UNIPROT_DESCRIPTION_LUT=${KINASE_UNIPROT_DESCRIPTION_LUT:-kinase_uniprot_description_lut}
+
 export LICENSE_URL_PHOSPHO_AGGREGATE_SQLITE='https://creativecommons.org/publicdomain/zero/1.0/'
-export LICENSE_ATTRIBUTION_PHOSPHO_AGGREGATE_SQLITE='Arthur Eschenlauer 2022, unpublished data; will replace this description when there a git repository exists.'
-export LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE="Art Eschenlauer has waived all copyright and related or neighboring rights to ${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT} and ${PHOSPHO_AGGREGATE_SQLITE}"
+export LICENSE_ATTRIBUTION_PHOSPHO_AGGREGATE_SQLITE='Arthur Eschenlauer 2022, https://github.com/eschen42/combine_phospho_dbs.'
+
+export LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE="Art Eschenlauer has waived all copyright and related or neighboring rights to ${PHOSPHO_AGGREGATE_SQLITE}"
+export LICENSE_TERMS_ELM_NETWORKIN_PSP_UNIPROT_LUT="${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE} and ${PHOSPHO_ELM_NETWORKIN_PSP_UNIPROT_LUT}."
+export LICENSE_TERMS_KINASE_NAME_UNIPROT_LUT="${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE} and ${KINASE_NAME_UNIPROT_LUT}."
+export LICENSE_TERMS_KINASE_UNIPROT_DESCRIPTION_LUT="${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE} and ${KINASE_UNIPROT_DESCRIPTION_LUT}."
+export LICENSE_TERMS_ENSEMBL_UNIPROT_TABLE="${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE} and ${ENSEMBL_UNIPROT_TABLE}."
+export LICENSE_TERMS_UNIPROT_ATTR_TABLE="${LICENSE_TERMS_PHOSPHO_AGGREGATE_SQLITE} and ${UNIPROT_ATTR_TABLE}."

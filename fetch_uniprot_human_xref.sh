@@ -26,9 +26,11 @@
 # - sqlite3 (command line shell for SQLite: https://sqlite.org/cli.html)
 # - gzip
 # - icon
+# - bzip2
 #
 # For example, these requirements may be met using conda, e.g.:
-#   conda create -n fetch_uniprot_xref -c conda-forge bash curl sqlite gzip icon
+#   conda create -n fetch_uniprot_xref -c conda-forge bash curl sqlite \
+#     bzip2 gzip icon
 #   conda activate fetch_uniprot_xref
 #
 ############################################################################
@@ -73,12 +75,18 @@ set -e
 SPECIES=${SPECIES:-HUMAN_9606}
 UNIPROT_PROTEOME=${UNIPROT_PROTEOME:-UP000005640_9606}
 SQ=${SQ:-sqlite3 -tabs -header}
+SQR=${SQR:-'sqlite3 -tabs -header -readonly'}
+BZ=${BZ:-bzip2 -9 --force}
 
 source urls_to_fetch.sh
 
 UNIPROT_XREF_SQLITE=${UNIPROT_XREF_SQLITE:-${SPECIES}_uniprot_xref.sqlite}
 DB=${UNIPROT_XREF_SQLITE}
 UNIPROT_PROTEOME_SQLITE=${UNIPROT_PROTEOME_SQLITE:-${UNIPROT_PROTEOME}.sqlite}
+ENSEMBL_UNIPROT_TABLE=${ENSEMBL_UNIPROT_TABLE:-ensembl_pro_uniprot_lut}
+ENSEMBL_UNIPROT_LUT=${ENSEMBL_UNIPROT_LUT:-${SPECIES}_${ENSEMBL_UNIPROT_TABLE}}
+UNIPROT_ATTR_LUT=${UNIPROT_ATTR_LUT:-${SPECIES}_uniprot_GN_DB_DE_ID_AC_MOD_lut}
+UNIPROT_ATTR_LIST=${UNIPROT_ATTR_LIST:-"\'GN\', \'DB\', \'DE\', \'ID\', \'AC\', \'MOD_RES\', \'PTM\'"}
 
 EC_SQL=${EC_SQL:-enzyme.sql}
 
@@ -167,9 +175,9 @@ if [ ! -z "${SPECIES_NAME}" ]; then
 # build the uniprot database
 if [ ! -e ${UNIPROT_PROTEOME_SQLITE} ]; then
   if [ -e ${UNIPROT_PROTEOME}.sql ]; then
-    echo "building SQLite database sqlite3 ${UNIPROT_PROTEOME_SQLITE} from SQL statements"
-    sqlite3 ${UNIPROT_PROTEOME_SQLITE} -init ${UNIPROT_PROTEOME}.sql '.quit'
-    echo "imported uniprot data into SQLite database sqlite3 ${UNIPROT_PROTEOME_SQLITE}"
+    echo "building SQLite database ${UNIPROT_PROTEOME_SQLITE} from SQL statements"
+    ${SQ} ${UNIPROT_PROTEOME_SQLITE} -init ${UNIPROT_PROTEOME}.sql '.quit'
+    echo "imported uniprot data into SQLite database ${UNIPROT_PROTEOME_SQLITE}"
     # be sure that extant ENZYME.sql file will be loaded
     if [ -e ${EC_SQL} ]; then
       touch ${EC_SQL}
@@ -210,9 +218,9 @@ elif [ enzyme.dat -nt ${EC_SQL} ]; then
   fi
 
 if [ -e ${EC_SQL} -a ${EC_SQL} -nt ${UNIPROT_PROTEOME_SQLITE} ]; then
-  echo "importing ENZYME (EC) data into SQLite database sqlite3 ${UNIPROT_PROTEOME_SQLITE} from SQL statements"
-  sqlite3 ${UNIPROT_PROTEOME_SQLITE} -init ${EC_SQL} '.quit'
-  echo "imported ENZYME (EC) data into SQLite database sqlite3 ${UNIPROT_PROTEOME_SQLITE}"
+  echo "importing ENZYME (EC) data into SQLite database ${UNIPROT_PROTEOME_SQLITE} from SQL statements"
+  ${SQ} ${UNIPROT_PROTEOME_SQLITE} -init ${EC_SQL} '.quit'
+  echo "imported ENZYME (EC) data into SQLite database ${UNIPROT_PROTEOME_SQLITE}"
   touch ${UNIPROT_PROTEOME_SQLITE}
 elif [ ! -e ${EC_SQL} ]; then
   echo "file  ${EC_SQL} not found"
@@ -222,6 +230,8 @@ if [ ! -e ${DB} ]; then
   echo "creating ${DB}"
   (
     cat << end_SQL
+      DROP TABLE IF EXISTS uniprot_multi_idmap;
+
       CREATE TABLE uniprot_multi_idmap (
         UniprotAccession TEXT PRIMARY KEY,
         UniProtKB_ID TEXT,
@@ -247,6 +257,8 @@ if [ ! -e ${DB} ]; then
         PubMed_additional TEXT
         );
 
+      DROP TABLE IF EXISTS uniprot_simple_idmap;
+
       CREATE TABLE uniprot_simple_idmap (
         UniprotAccession TEXT,
         RefClass TEXT,
@@ -263,27 +275,48 @@ end_SQL
   echo "importing ${SPECIES}_idmapping_selected.tab.gz"
   gzip -c -d ${SPECIES}_idmapping_selected.tab.gz | ${SQ} ${DB} '.import /dev/stdin uniprot_multi_map'
   ${SQ} ${DB} '
-    INSERT INTO uniprot_multi_idmap SELECT * FROM uniprot_multi_map;
+    INSERT INTO uniprot_multi_idmap
+      SELECT * FROM uniprot_multi_map;
     DROP TABLE uniprot_multi_map;
     '
   echo "importing ${SPECIES}_idmapping.dat.gz"
   gzip -c -d ${SPECIES}_idmapping.dat.gz          | ${SQ} ${DB} '.import /dev/stdin uniprot_simple_map'
   ${SQ} ${DB} '
-    INSERT INTO uniprot_simple_idmap SELECT * FROM uniprot_simple_map;
+    INSERT INTO uniprot_simple_idmap
+      SELECT * FROM uniprot_simple_map;
     DROP TABLE uniprot_simple_map;
     '
-  echo "creating view ensembl_uniprot_lut"
+  echo "creating table ${ENSEMBL_UNIPROT_TABLE}"
+
   ${SQ} ${DB} "
-    DROP TABLE IF EXISTS ensembl_uniprot_lut;
-    CREATE TABLE ensembl_uniprot_lut
-    AS
+    DROP TABLE IF EXISTS ${ENSEMBL_UNIPROT_TABLE}
+    ;
+    CREATE TABLE ${ENSEMBL_UNIPROT_TABLE} (
+      ensembl_acc TEXT,
+      uniprot_acc TEXT
+    )
+    ;
+    CREATE INDEX ${ENSEMBL_UNIPROT_TABLE}_ix
+        ON ${ENSEMBL_UNIPROT_TABLE}(ensembl_acc)
+    ;
+    INSERT INTO ${ENSEMBL_UNIPROT_TABLE}
       SELECT DISTINCT 
-        iif(instr(Reference,'.')>0, substr(Reference,1+instr(Reference,'.')), Reference) AS ensembl_acc,
-        UniprotAccession AS uniprot_acc
+        CASE
+          WHEN instr(Reference,'.') > 0
+            THEN substr(Reference,1,instr(Reference,'.') - 1)
+            ELSE Reference
+        END AS ensembl_acc,
+        s.uniprot_acc
       FROM
-        uniprot_simple_idmap
-      WHERE (RefClass = 'STRING' OR RefClass = 'Ensembl_PRO')
-      ORDER BY ensembl_acc;
+        (
+          SELECT Reference, UniprotAccession AS uniprot_acc
+          FROM uniprot_simple_idmap
+          WHERE Reference LIKE 'ENSP%'
+        ) s,
+        uniprot_multi_idmap  m
+      WHERE s.uniprot_acc = m.UniprotAccession
+      ORDER BY ensembl_acc
+      ;
     "
   
   echo "'vacuuming' ${DB}"
@@ -292,11 +325,17 @@ end_SQL
 
 ${SQ} ${DB} "${CITTBL_CREATE}"
 ${SQ} ${DB} "
-  ${CITTBL_INSERT_TBL_URL_ATTRB} \
+  ${CITTBL_INSERT} \
   ('uniprot_multi_idmap',  '${LICENSE_URL_UNIPROT}', '${LICENSE_ATTRIBUTION_UNIPROT}', '${LICENSE_TERMS_UNIPROT}', '"${CITTBL_DERIVED_NO}"'),
   ('uniprot_simple_idmap', '${LICENSE_URL_UNIPROT}', '${LICENSE_ATTRIBUTION_UNIPROT}', '${LICENSE_TERMS_UNIPROT}', '"${CITTBL_DERIVED_NO}"'),
-  ('ensembl_uniprot_lut',  '${LICENSE_URL_UNIPROT}', '${LICENSE_ATTRIBUTION_UNIPROT}', '${LICENSE_TERMS_UNIPROT}', '"${CITTBL_DERIVED_YES}"')
+  ('${ENSEMBL_UNIPROT_TABLE}',  '${LICENSE_URL_UNIPROT}', '${LICENSE_ATTRIBUTION_UNIPROT}', '${LICENSE_TERMS_UNIPROT}', '"${CITTBL_DERIVED_YES}"')
   ;"
 
-echo "exporting ${SPECIES}_ensembl_uniprot_lut.tabular"
-${SQ} ${DB} 'SELECT * FROM ensembl_uniprot_lut;' > ${SPECIES}_ensembl_uniprot_lut.tabular
+echo "exporting ${ENSEMBL_UNIPROT_LUT}.sql.bz2"
+
+${SQR} ${DB} ".dump ${ENSEMBL_UNIPROT_TABLE}" | ${BZ} -c > ${ENSEMBL_UNIPROT_LUT}.sql.bz2
+
+echo "exporting ${UNIPROT_ATTR_LUT}.tabular"
+${SQR} ${UNIPROT_PROTEOME_SQLITE} 'select * from upatr_uplst_v where attribute in ('"${UNIPROT_ATTR_LIST}"')' > ${UNIPROT_ATTR_LUT}.tabular
+
+${BZ} --keep ${UNIPROT_ATTR_LUT}.tabular
