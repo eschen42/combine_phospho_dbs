@@ -2,6 +2,13 @@
 
 ## Purpose
 
+The [**MaxQuant Phosphopeptide Preprocessing**](https://toolshed.g2.bx.psu.edu/repository/display_tool?repository_id=7b866682d0b1d44c&tool_config=%2Fsrv%2Ftoolshed-repos%2Fmain%2F006%2Frepo_6289%2Fmqppep_preproc.xml&changeset_revision=bae3a23461c9&render_repository_actions_for=tool_shed) tool requires the following four files as static inputs:
+
+  - `networkin_cutoff_2.tabular`
+  - `pSTY_motifs.tabular`
+  - `psp_kinase_substrate_dataset.tabular`
+  - `psp_regulatory_sites.tabular`
+
 The scripts in the `combine_phospho_dbs` repository fetch and aggregate
 data from:
 
@@ -11,9 +18,34 @@ data from:
 - UniProt
 - ENZYME
 
+and produce these four tabular files plus an aggregation of these data
+
+```
+  combined_phospho_dbs.sqlite
+```
+
+By default, human data are retrieved.  See [section "Default settings" below](#default-settings) for alternatives.
+
+## TL;DR
+
+1. Read and conform with [the "Licenses for data fetched by these scripts" section](#licenses-for-data-fetched-by-these-scripts).
+2. Run the following commands:
+
+```bash
+  conda create -n combophospho -c conda-forge bash bzip2 curl icon make sed sqlite xz
+  conda activate combophospho
+  make
+```
+3. Take the following files:
+
+  - `networkin_cutoff_2.tabular`
+  - `pSTY_motifs.tabular`
+  - `psp_kinase_substrate_dataset.tabular`
+  - `psp_regulatory_sites.tabular`
+
 ## Results
 
-Several [SQLite](https://sqlite.org) databases are produced by these scripts.
+In addition to the four tabular files, several [SQLite](https://sqlite.org) databases are produced by these scripts.
 
 The aggregated data are written to the
 ```
@@ -23,6 +55,8 @@ file (about 80 megabytes).
 
 Reference citations are copied from `urls_to_fetch.sh` to the
 `citation` table in `combined_phospho_dbs.sqlite`.
+
+At the conclusion of the process, the reference and license information is emitted for the various data sources.
 
 ## Licenses for data fetched by these scripts
 
@@ -73,8 +107,10 @@ The scripts vary in their requirements, the union of which are:
 
 - `amd64` (i.e., 64-bit Intel-/AMD-based) Linux
 - bash
+- bzip2
 - curl
 - icon 
+- make
 - sed
 - sqlite
 - xz
@@ -86,7 +122,7 @@ a ["Conda"](https://docs.conda.io/en/latest/) environment
 with packages from the conda-forge channel, e.g.:
 
 ```bash
-  conda create -n combophospho -c conda-forge bash curl icon sed sqlite xz
+  conda create -n combophospho -c conda-forge bash bzip2 curl icon make sed sqlite xz
   conda activate combophospho
 ```
 
@@ -114,7 +150,7 @@ docker run -ti --rm -v `readlink -f .`:/src docker.io/condaforge/miniforge3 bash
 # now you are in the Docker container, running as `root`
 
 # Create a conda environment that meets the platform requirements
-conda create -n combophospho -c conda-forge bash curl icon sed sqlite xz
+conda create -n combophospho -c conda-forge bash bzip2 curl icon make sed sqlite xz
 
 # Activate the requirement
 conda activate combophospho

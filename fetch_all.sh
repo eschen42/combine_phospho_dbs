@@ -108,10 +108,6 @@ if [ -e ${PHOSPHO_AGGREGATE_SQLITE} ]; then
   fi
 
 echo ''
-echo fetch Amanchy patterns
-bash fetch_amanchy.sh
-
-echo ''
 echo fetch PhosphoSitePlus datasets
 bash fetch_phosphositesplus.sh
 
@@ -120,6 +116,11 @@ echo fetch phospho.ELM
 bash fetch_elm.sh
 echo '  created SQLite tables:'
 ${SQ} ${PHOSPHOELM_SQLITE} '.tables' | sed -e 's/^/    /';
+
+# fetch_amanchy relies upon phosphoelm_kin_bind_detail.tabular produced by fetch_elm
+echo ''
+echo fetch Amanchy patterns
+bash fetch_amanchy.sh
 
 echo ''
 echo fetch NetworKIN

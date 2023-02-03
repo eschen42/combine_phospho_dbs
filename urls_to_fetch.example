@@ -65,7 +65,7 @@ export LICENSE_AGREED_NETWORKIN="YES ${LICENSE_URL_NETWORKIN}"
 export LICENSE_ATTRIBUTION_NETWORKIN="Horn et al., KinomeXplorer: an integrated platform for kinome biology studies. Nature Methods 2014 Jun;11(6):603-4, DOI: 10.1038/nmeth.2968.  PMID: 24874572."
 export LICENSE_TERMS_NETWORKIN="Commercial users are requested to contact the authors before using the data on this website.  If you use any of the data from this web site please cite Horn et al. (2014)."
 
-export URL_NETWORKIN_HUMAN_PREDICTIONS_3_1='http://networkin.science/download/networkin_human_predictions_3.1.tsv.xz'
+export URL_NETWORKIN_HUMAN_PREDICTIONS_3_1='https://web.archive.org/web/20220524211242if_/http://networkin.science/download/networkin_human_predictions_3.1.tsv.xz'
 export NETWORKIN_SQLITE=${NETWORKIN_SQLITE:-networkin.sqlite}
 
 ###################################
