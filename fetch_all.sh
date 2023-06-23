@@ -381,6 +381,9 @@ echo ''
 let ONECOL="-1 + $COLUMNS / 5"
 export ONECOL
 (
+  echo ".mode markdown --wrap 1024 --wordwrap off --noquote";
+  echo ".once citation.md";
+  echo "SELECT * FROM citation ORDER BY table_name, derivation;";
   echo ".mode table --wrap ${ONECOL} --wordwrap on --noquote";
   echo "SELECT * FROM citation ORDER BY table_name, derivation";
 ) | ${SQR} ${PHOSPHO_AGGREGATE_SQLITE}
