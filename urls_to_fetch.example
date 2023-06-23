@@ -71,8 +71,8 @@ export NETWORKIN_SQLITE=${NETWORKIN_SQLITE:-networkin.sqlite}
 ###################################
 
 # No license requirements are posted anywhere at the Phosida site
-export URL_PHOSIDA='http://pegasus.biochem.mpg.de/phosida/help/motifs.aspx'
-export LICENSE_URL_PHOSIDA="http://pegasus.biochem.mpg.de/phosida/index.aspx"
+export URL_PHOSIDA='http://phosida.org/phosida/help/motifs.aspx'
+export LICENSE_URL_PHOSIDA="http://phosida.org/phosida/index.aspx"
 export LICENSE_ATTRIBUTION_PHOSIDA="Gnad F, Gunawardena J, Mann M. PHOSIDA 2011: the posttranslational modification database. Nucleic Acids Res. 2011 Jan;39(Database issue):D253-60. DOI: 10.1093/nar/gkq1159. Epub 2010 Nov 16, DOI: 10.1093/nar/gkq1159.  PMID: 21081558."
 export LICENSE_TERMS_PHOSIDA="Data published in Gnad et al. (2010).  Copyright (c) the author(s) 2010. Published by Oxford University Press."
 export PHOSIDA_SQLITE=${PHOSIDA_SQLITE:-phosida_motifs.sqlite}
