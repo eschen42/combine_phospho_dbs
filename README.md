@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8083167.svg)](https://doi.org/10.5281/zenodo.8083167)
+
 # `combine_phospho_dbs` - Aggregate kinase and substrate data
 
 ## Purpose
