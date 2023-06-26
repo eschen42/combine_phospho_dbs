@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The [**MaxQuant Phosphopeptide Preprocessing**](https://toolshed.g2.bx.psu.edu/repository/display_tool?repository_id=7b866682d0b1d44c&tool_config=%2Fsrv%2Ftoolshed-repos%2Fmain%2F006%2Frepo_6289%2Fmqppep_preproc.xml&changeset_revision=bae3a23461c9&render_repository_actions_for=tool_shed) tool requires the following four files as static inputs:
+The Galaxy [**MaxQuant Phosphopeptide Preprocessing**](https://toolshed.g2.bx.psu.edu/view/galaxyp/mqppep_preproc/b889e05ce77d) tool requires the following four files as static inputs:
 
   - `networkin_cutoff_2.tabular`
   - `pSTY_motifs.tabular`
@@ -18,11 +18,17 @@ data from:
 - UniProt
 - ENZYME
 
-and produce these four tabular files plus an aggregation of these data
+and produce these four tabular files.
 
-```
-  combined_phospho_dbs.sqlite
-```
+In addition to the four required tabular files, this tool also produces two files that are built into the
+MaxQuant Phosphopeptide Preprocessing tool:
+
+  - `kinase_name_uniprot_lut.tabular.bz2`
+  - `kinase_uniprot_description_lut.tabular.bz2`
+
+and an aggregation of these data as a SQLite3 database that may be used for *ad hoc* queries:
+
+  - `combined_phospho_dbs.sqlite`
 
 By default, human data are retrieved.  See [section "Default settings" below](#default-settings) for alternatives.
 
@@ -60,27 +66,17 @@ At the conclusion of the process, the reference and license information is emitt
 
 ## Licenses for data fetched by these scripts
 
-Data from the first three data sources listed above may be used only upon
-acceptance of "academic", non-commercial use licenses.  Please see
-```
-  urls_to_fetch.example
-```
-for the licensing terms to which users must adhere.
+***Data from NetworKIN, Phospho.ELM, and PhosphoSitesPlus may be used only upon
+acceptance of "academic", non-commercial use licenses.***
+Please *see [citation.md](citation.md) for the licensing terms* to which users must adhere.
 
-The scripts depend upon the file
-```
-  urls_to_fetch.sh
-```
-which may be obtained by copying or linking `urls_to_fetch.example`;
-doing so constitutes acceptance of the license terms.
-
+**The scripts depend upon the file `urls_to_fetch.sh` which may be obtained
+by copying the contents of `urls_to_fetch.example` to `urls_to_fetch.sh`;
+*doing so constitutes acceptance of the license terms!***
 Note that `urls_to_fetch.sh` performs most of the configuration
-for the scripts rather than merely listing URLs
+for the scripts rather than merely listing URLs.
 
-It should not be difficult to rewrite the
-```
-  fetch_all.sh
-```
+It should not be difficult to rewrite the `fetch_all.sh`
 to omit collection of data not authorized for non-commercial use.
 
 ## Default settings
